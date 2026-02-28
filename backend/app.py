@@ -21,14 +21,14 @@ index = pc.Index("mental-health-assistant")
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def retrieve_context(question):
-    """Get relevant context from Pinecone"""
+    # Get relevant context from Pinecone
     query_vector = model.encode(question).tolist()
     results = index.query(vector=query_vector, top_k=3, include_metadata=True)
     context = [match['metadata']['text'] for match in results['matches']]
     return "\n\n---\n\n".join(context)
 
 def ask_llm(question, context):
-    """Generate response using OpenRouter"""
+    # Generate response using OpenRouter
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
@@ -37,12 +37,26 @@ def ask_llm(question, context):
     payload = {
         "model": "arcee-ai/trinity-large-preview:free",
         "messages": [
-            {"role": "system", "content": "You are an empathetic mental health assistant for university students experiencing academic stress."},
-            {"role": "user", "content": f"Context:\n{context}\n\nStudent question: {question}"}
-        ]
+        {
+            "role": "system", 
+            "content": """You are an empathetic mental health assistant for Kenyan university students experiencing academic stress.
+
+        CRITICAL INSTRUCTIONS:
+        - If the user asks for a brief response, give MAXIMUM 3 sentences
+        - If user says "briefly", respond in 2-3 sentences only
+        - Always follow user's formatting requests (brief, detailed, bullet points, etc.)
+        - Be conversational and warm, like a supportive friend
+        - Acknowledge the user's specific situation before giving advice
+        - If user corrects you or repeats a request, adjust immediately
+
+        Your goal: Be empathetic, helpful, concise when asked, and actually listen to what the student needs."""
+        },
+        {"role": "user", "content": f"Context:\n{context}\n\nStudent question: {question}"}
+    ]
     }
     
     response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+    print("Response:", response.json()) 
     return response.json()["choices"][0]["message"]["content"]
 
 @app.route("/")
@@ -51,12 +65,13 @@ def home():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    """Main chat endpoint"""
+    #Main chat endpoint
     data = request.json
     question = data['message']
+    history = data.get('history', [])
     
     context = retrieve_context(question)
-    answer = ask_llm(question, context)
+    answer = ask_llm(question, context, history)
     
     return jsonify({"reply": answer})
 
