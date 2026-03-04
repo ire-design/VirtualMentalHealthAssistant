@@ -11,17 +11,26 @@ function ChatInterface() {
     if (!input.trim()) return;
 
     const userMessage = { role: 'user', content: input };
-    setMessages([...messages, userMessage]);
+
+    const updatedMessages = [...messages, userMessage];
+
+    setMessages([updatedMessages]);
     setInput('');
     setLoading(true);
 
     try {
-      const reply = await sendMessage(input);
+      const reply = await sendMessage(input, updatedMessages);
+
       const aiMessage = { role: 'assistant', content: reply };
-      setMessages(prev => [...prev, aiMessage]);
+
+      setMessages( [...updatedMessages, aiMessage]);
+
     } catch (error) {
-      const errorMessage = { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' };
-      setMessages(prev => [...prev, errorMessage]);
+      const errorMessage = { 
+        role: 'assistant', 
+        content: 'Sorry, something went wrong. Please try again.' 
+      };
+      setMessages(prev => [...updatedMessages, errorMessage]);
     }
     
     setLoading(false);
