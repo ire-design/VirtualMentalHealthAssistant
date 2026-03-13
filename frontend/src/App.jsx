@@ -1,13 +1,28 @@
-import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import ChatInterface from './components/chatInterface.jsx';
-import './styles/global.css';
+import LandingPage from './pages/LandingPage';
+import LoginPage from './pages/LoginPage';
+import SignupPage from './pages/SignupPage';
+import DashboardPage from './pages/DashboardPage';
+import Navbar from './components/Navbar';
+
 
 function App() {
-
   return (
+    <Router>
+
     <div className='App'>
-      <ChatInterface/>
+      <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/chat" element={<ChatInterface />} />
+          <Route path="*" element={<Navigate to="/" />} />
+      </Routes>
     </div>
+
+    </Router>
   );
 }
 
