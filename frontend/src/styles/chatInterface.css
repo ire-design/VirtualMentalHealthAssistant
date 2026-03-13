@@ -1,99 +1,261 @@
+/* Layout with sidebar */
+.chat-layout {
+  display: flex;
+  height: calc(100vh - 60px);
+  background: #F5F5F5;
+}
+
+/* Sidebar */
+.chat-sidebar {
+  width: 280px;
+  background: #003366;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #002244;
+}
+
+.new-chat-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 14px;
+  margin: 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  transition: all 0.3s;
+}
+
+.new-chat-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.conversation-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px;
+}
+
+.convo-item {
+  padding: 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.convo-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.convo-item.active {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Main chat area */
+.chat-main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+}
+
 .chat-container {
   max-width: 900px;
-  margin: 50px auto;
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 8px 24px rgba(0, 51, 102, 0.2);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
   background: white;
 }
 
+/* Crisis Banner */
+.crisis-banner {
+  background: linear-gradient(135deg, #D32F2F 0%, #C62828 100%);
+  color: white;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
+}
+
+.crisis-banner strong {
+  font-size: 16px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.crisis-banner p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.crisis-banner button {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: white;
+  font-size: 24px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* Header */
 .chat-header {
-  background: linear-gradient(135deg, #003366 0%, #004080 100%);
+  background: linear-gradient(135deg, #003366 0%, #004d99 100%);
   color: white;
   padding: 24px;
   text-align: center;
 }
 
 .chat-header h2 {
-  margin: 0;
-  font-size: 26px;
+  margin: 0 0 8px 0;
+  font-size: 28px;
   font-weight: 700;
 }
 
 .chat-header p {
-  margin: 8px 0 0 0;
-  opacity: 0.95;
+  margin: 0 0 12px 0;
   font-size: 15px;
-  font-weight: 400;
 }
 
+/* Stress Indicator */
+.stress-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.15);
+  padding: 8px 16px;
+  border-radius: 20px;
+  margin-top: 12px;
+}
+
+.stress-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.stress-badge.low { background: #4CAF50; color: white; }
+.stress-badge.moderate { background: #FF9800; color: white; }
+.stress-badge.severe { background: #F44336; color: white; }
+.stress-badge.crisis { background: #D32F2F; color: white; }
+
+/* Messages */
 .messages {
-  height: 550px;
+  flex: 1;
   overflow-y: auto;
   padding: 24px;
-  background: linear-gradient(to bottom, #E3F2FD 0%, #BBDEFB 100%);
+  background: linear-gradient(to bottom, #E8F4F8 0%, #D1E7F0 100%);
 }
 
+.welcome-message {
+  text-align: center;
+  padding: 60px 20px;
+  color: #455A64;
+}
+
+.welcome-message h3 {
+  font-size: 28px;
+  margin: 0 0 12px 0;
+  color: #003366;
+}
+
+.welcome-message p {
+  font-size: 16px;
+  margin: 0;
+}
+
+/* Message Bubbles - FIXED ALIGNMENT */
 .message {
   margin: 14px 0;
   padding: 14px 18px;
-  border-radius: 16px;
-  max-width: 75%;
+  border-radius: 18px;
+  max-width: 70%;
   word-wrap: break-word;
   line-height: 1.6;
+  animation: messageSlide 0.3s ease-out;
+}
+
+@keyframes messageSlide {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .message.user {
-  background: #4FC3F7;
+  background: linear-gradient(135deg, #42A5F5 0%, #2196F3 100%);
   color: white;
   margin-left: auto;
-  text-align: right;
-  box-shadow: 0 2px 8px rgba(79, 195, 247, 0.3);
+  margin-right: 0;
+  text-align: left;
 }
 
 .message.assistant {
-  background: #E8F5E9;
-  color: #1B5E20;
-  border: 1px solid #C8E6C9;
-  box-shadow: 0 2px 8px rgba(129, 199, 132, 0.2);
+  background: #FFFFFF;
+  color: #263238;
+  border: 1px solid #CFD8DC;
+  margin-right: auto;
+  margin-left: 0;
 }
 
 .message.typing {
   opacity: 0.7;
   font-style: italic;
-  animation: pulse 1.5s ease-in-out infinite;
+  animation: typingPulse 1.5s ease-in-out infinite;
 }
 
-@keyframes pulse {
+@keyframes typingPulse {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 0.9; }
 }
 
 .message p {
   margin: 0;
+  white-space: pre-wrap;
 }
 
+/* Input Area */
 .input-area {
   display: flex;
   padding: 20px;
   background: white;
-  border-top: 2px solid #BBDEFB;
+  border-top: 2px solid #CFD8DC;
   gap: 12px;
 }
 
 .input-area input {
   flex: 1;
   padding: 14px 18px;
-  border: 2px solid #90CAF9;
+  border: 2px solid #B0BEC5;
   border-radius: 12px;
   font-size: 16px;
   outline: none;
   font-family: 'Alegreya', serif;
-  transition: border-color 0.3s;
+  transition: all 0.3s;
 }
 
 .input-area input:focus {
   border-color: #42A5F5;
+  box-shadow: 0 0 0 3px rgba(66, 165, 245, 0.1);
+}
+
+.input-area input:disabled {
+  background: #F5F5F5;
+  cursor: not-allowed;
 }
 
 .input-area button {
@@ -105,9 +267,7 @@
   cursor: pointer;
   font-size: 16px;
   font-weight: 600;
-  font-family: 'Alegreya', serif;
-  transition: transform 0.2s, box-shadow 0.2s;
-  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+  transition: all 0.3s;
 }
 
 .input-area button:hover:not(:disabled) {
@@ -118,5 +278,14 @@
 .input-area button:disabled {
   background: #B0BEC5;
   cursor: not-allowed;
-  box-shadow: none;
+}
+
+@media (max-width: 768px) {
+  .chat-sidebar {
+    width: 200px;
+  }
+  
+  .message {
+    max-width: 85%;
+  }
 }
