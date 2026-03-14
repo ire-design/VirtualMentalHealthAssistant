@@ -58,6 +58,52 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+/* Sidebar items now contain a delete button */
+.convo-item button {
+  flex: 0 0 auto;
+}
+
+.convo-item button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* --- ChatGPT-like sidebar row + hover delete icon --- */
+.convo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.convo-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.convo-delete-btn {
+  flex: 0 0 auto;
+  opacity: 0;
+  pointer-events: none;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 10px;
+  padding: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.convo-item:hover .convo-delete-btn,
+.convo-item:focus-within .convo-delete-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.convo-delete-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
 /* Main chat area */
 .chat-main {
   flex: 1;
