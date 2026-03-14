@@ -1,45 +1,37 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import Navbar from '../components/Navbar';
+import { getDashboardSummary } from '../utils/api';
 import '../styles/Dashboard.css';
 
 function DashboardPage() {
-  const [user, setUser] = useState(null);
-  const [stats, setStats] = useState({ total: 0, low: 0, moderate: 0, severe: 0 });
-  const [recentChats, setRecentChats] = useState([]);
   const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     const userData = localStorage.getItem('user');
 
     if (!token) {
-      navigate('/login');
+      // Guests shouldn’t be on dashboard; let them chat instead.
+      navigate('/chat');
       return;
     }
 
-    setUser(JSON.parse(userData));
-    fetchHistory(token);
+    setUser(userData ? JSON.parse(userData) : null);
+
+    (async () => {
+      try {
+        const data = await getDashboardSummary();
+        setSummary(data);
+      } catch (e) {
+        console.error(e);
+        setError('Failed to load dashboard.');
+      }
+    })();
   }, [navigate]);
-
-  const fetchHistory = async (token) => {
-    try {
-      const response = await axios.get('http://localhost:5000/history', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      const chats = response.data.chats;
-      setRecentChats(chats.slice(-6).reverse()); // Last 6 messages
-
-      // Calculate stress stats (you can improve this logic)
-      const total = chats.filter(c => c.role === 'user').length;
-      setStats({ total, low: 0, moderate: 0, severe: 0 }); // Placeholder
-
-    } catch (error) {
-      console.error('Failed to fetch history:', error);
-    }
-  };
 
   if (!user) return <div>Loading...</div>;
 
@@ -48,50 +40,57 @@ function DashboardPage() {
       <Navbar />
       <div className="dashboard-container">
         <div className="dashboard-content">
-          
           <div className="welcome-section">
-            <h1>Welcome back, {user.name}! 👋</h1>
-            <p>How are you feeling today?</p>
+            <h1>Welcome back, {user.name}!</h1>
+            <p>Your saved conversations are available below.</p>
             <button className="btn-start-chat" onClick={() => navigate('/chat')}>
               Start New Conversation
             </button>
           </div>
 
+          {error && <div style={{ color: '#C62828', marginBottom: 16 }}>{error}</div>}
+
           <div className="stats-grid">
             <div className="stat-card">
-              <div className="stat-number">{stats.total}</div>
+              <div className="stat-number">{summary?.total_conversations ?? 0}</div>
               <div className="stat-label">Total Conversations</div>
             </div>
             <div className="stat-card low">
-              <div className="stat-number">{stats.low}</div>
-              <div className="stat-label">Low Stress</div>
+              <div className="stat-number">—</div>
+              <div className="stat-label">Stress Insights (next)</div>
             </div>
             <div className="stat-card moderate">
-              <div className="stat-number">{stats.moderate}</div>
-              <div className="stat-label">Moderate Stress</div>
+              <div className="stat-number">—</div>
+              <div className="stat-label">Mood Tracking (next)</div>
             </div>
             <div className="stat-card severe">
-              <div className="stat-number">{stats.severe}</div>
-              <div className="stat-label">Severe Stress</div>
+              <div className="stat-number">—</div>
+              <div className="stat-label">Wellness Tools (next)</div>
             </div>
           </div>
 
           <div className="recent-section">
             <h2>Recent Conversations</h2>
-            {recentChats.length === 0 ? (
-              <p className="no-chats">No conversations yet. Start chatting to see your history!</p>
+
+            {(summary?.recent_conversations || []).length === 0 ? (
+              <p className="no-chats">No saved conversations yet. Start chatting!</p>
             ) : (
               <div className="chat-history">
-                {recentChats.map((chat, idx) => (
-                  <div key={idx} className={`history-item ${chat.role}`}>
-                    <span className="role-badge">{chat.role === 'user' ? 'You' : 'Assistant'}</span>
-                    <p>{chat.content.substring(0, 100)}...</p>
+                {summary.recent_conversations.map((c) => (
+                  <div
+                    key={c.id}
+                    className="history-item user"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/chat?c=${encodeURIComponent(c.id)}`)}
+                    title="Open conversation"
+                  >
+                    <span className="role-badge">Conversation #{c.id}</span>
+                    <p>{c.preview}</p>
                   </div>
                 ))}
               </div>
             )}
           </div>
-
         </div>
       </div>
     </>

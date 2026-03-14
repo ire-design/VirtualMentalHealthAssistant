@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import { login } from '../utils/api';
 import '../styles/AuthPages.css';
 
 function LoginPage() {
@@ -16,27 +16,22 @@ function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:5000/login', {
-        email,
-        password
-      });
-
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-      
+      const data = await login(email, password);
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
       navigate('/dashboard');
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   return (
     <div className="auth-container">
       <div className="auth-card">
         <h2>Welcome Back</h2>
-        <p className="subtitle">Login to continue your mental health journey</p>
+        <p className="subtitle">Login to save your conversations and view history.</p>
 
         {error && <div className="error-message">{error}</div>}
 
@@ -63,9 +58,9 @@ function LoginPage() {
         <p className="auth-link">
           Don't have an account? <Link to="/signup">Sign up</Link>
         </p>
-        
+
         <p className="auth-link">
-          <Link to="/dashboard">Continue as Guest</Link>
+          <Link to="/chat">Continue anonymously</Link>
         </p>
       </div>
     </div>

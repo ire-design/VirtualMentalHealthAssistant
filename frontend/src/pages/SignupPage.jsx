@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import { register } from '../utils/api';
 import '../styles/AuthPages.css';
 
 function SignupPage() {
@@ -17,28 +17,22 @@ function SignupPage() {
     setLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:5000/register', {
-        name,
-        email,
-        password
-      });
-
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-      
-      navigate('/chat');
+      const data = await register(name, email, password);
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      navigate('/dashboard');
     } catch (err) {
       setError(err.response?.data?.error || 'Signup failed');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   return (
     <div className="auth-container">
       <div className="auth-card">
         <h2>Create Account</h2>
-        <p className="subtitle">Join our mental health support community</p>
+        <p className="subtitle">Create an account to save your conversations.</p>
 
         {error && <div className="error-message">{error}</div>}
 
@@ -73,9 +67,9 @@ function SignupPage() {
         <p className="auth-link">
           Already have an account? <Link to="/login">Login</Link>
         </p>
-        
+
         <p className="auth-link">
-          <Link to="/dashboard">Continue as Guest</Link>
+          <Link to="/chat">Continue anonymously</Link>
         </p>
       </div>
     </div>
