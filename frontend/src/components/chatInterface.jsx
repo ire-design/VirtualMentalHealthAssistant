@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faExclamationTriangle, faTrash } from '@fortawesome/free-solid-svg-icons';
 import {
   sendMessage,
   getConversations,
@@ -23,19 +25,16 @@ function ChatInterface() {
   const [stressLevel, setStressLevel] = useState(null);
   const [showCrisisAlert, setShowCrisisAlert] = useState(false);
 
-  // Undo toast state
   const [toastVisible, setToastVisible] = useState(false);
   const [toastSecondsLeft, setToastSecondsLeft] = useState(0);
   const [lastDeletedConvoId, setLastDeletedConvoId] = useState(null);
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const messagesEndRef = useRef(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
   const refreshConversations = async () => {
@@ -53,6 +52,7 @@ function ChatInterface() {
     setMessages(convo.messages || []);
     setStressLevel(null);
     setShowCrisisAlert(false);
+    setSidebarOpen(false);
     window.history.replaceState({}, '', `/chat?c=${encodeURIComponent(convo.id)}`);
   };
 
@@ -62,6 +62,7 @@ function ChatInterface() {
       setMessages([]);
       setStressLevel(null);
       setShowCrisisAlert(false);
+      setSidebarOpen(false);
       window.history.replaceState({}, '', '/chat');
       return;
     }
@@ -73,6 +74,7 @@ function ChatInterface() {
     setMessages([]);
     setStressLevel(null);
     setShowCrisisAlert(false);
+    setSidebarOpen(false);
 
     await refreshConversations();
     window.history.replaceState({}, '', `/chat?c=${encodeURIComponent(convoId)}`);
@@ -95,9 +97,8 @@ function ChatInterface() {
         await refreshConversations();
 
         const fromQuery = getConvoIdFromQuery();
-        if (fromQuery) {
-          await openConversation(fromQuery);
-        } else {
+        if (fromQuery) await openConversation(fromQuery);
+        else {
           setCurrentConvoId(null);
           setMessages([]);
         }
@@ -108,14 +109,9 @@ function ChatInterface() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Toast countdown timer
   useEffect(() => {
     if (!toastVisible) return;
-
-    const t = setInterval(() => {
-      setToastSecondsLeft((s) => Math.max(0, s - 1));
-    }, 1000);
-
+    const t = setInterval(() => setToastSecondsLeft((s) => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
   }, [toastVisible]);
 
@@ -132,7 +128,6 @@ function ChatInterface() {
 
     try {
       const resp = await deleteConversation(convoId);
-
       await refreshConversations();
 
       if (String(currentConvoId) === String(convoId)) {
@@ -159,7 +154,6 @@ function ChatInterface() {
       await undoDeleteConversation(lastDeletedConvoId);
       setToastVisible(false);
       setToastSecondsLeft(0);
-
       await refreshConversations();
       setLastDeletedConvoId(null);
     } catch (e) {
@@ -173,7 +167,6 @@ function ChatInterface() {
     const trimmedInput = input.trim();
     if (!trimmedInput || loading) return;
 
-    // If logged in and no conversation yet, create one silently on first send.
     let convoId = currentConvoId;
     if (token && (convoId === null || convoId === undefined)) {
       try {
@@ -192,15 +185,27 @@ function ChatInterface() {
     const userMessage = { role: 'user', content: trimmedInput };
     const updatedMessages = [...messages, userMessage];
 
+    // IMPORTANT:
+    // Send history WITHOUT the latest user message because the backend receives `message` separately.
+    const historyWithoutLatest = messages;
+
     setMessages(updatedMessages);
     setInput('');
     setLoading(true);
 
     try {
-      const data = await sendMessage(trimmedInput, updatedMessages, convoId);
+      const data = await sendMessage(trimmedInput, historyWithoutLatest, convoId);
 
-      if (data.stress_level) setStressLevel(data.stress_level);
-      if (data.is_crisis) setShowCrisisAlert(true);
+      const isCrisis =
+        Boolean(data.is_crisis) || String(data.stress_level || '').toLowerCase() === 'crisis';
+
+      if (isCrisis) {
+        setStressLevel('crisis');
+        setShowCrisisAlert(true);
+      } else {
+        if (data.stress_level) setStressLevel(String(data.stress_level).toLowerCase());
+        setShowCrisisAlert(false);
+      }
 
       const aiMessage = { role: 'assistant', content: data.reply };
       setMessages([...updatedMessages, aiMessage]);
@@ -208,157 +213,150 @@ function ChatInterface() {
       if (token) await refreshConversations();
     } catch (error) {
       console.error('Send error:', error);
-      const errorMessage = {
-        role: 'assistant',
-        content: 'Sorry, something went wrong. Please try again.'
-      };
-      setMessages([...updatedMessages, errorMessage]);
+      setMessages([
+        ...updatedMessages,
+        { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
   const showWelcome = messages.length === 0 && !loading;
+  const stressLevelLabels = {
+    low: 'Low stress signals',
+    moderate: 'Moderate stress signals',
+    severe: 'High stress signals',
+    crisis: 'Urgent support recommended'
+  };
 
   return (
     <>
-      <div className="chat-layout">
-        <div className="chat-sidebar">
-          <button className="new-chat-btn" onClick={startNewChat}>
-            + New Chat
+      <div className="chat-shell">
+        <div className="chat-topbar">
+          <button className="menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open history">
+            ☰
           </button>
+          <div className="topbar-title">
+            <div className="t1">Virtual Mental Health Assistant</div>
+            <div className="t2">Academic Stress Support</div>
+          </div>
 
-          {!token && (
-            <div style={{ padding: '0 16px 16px', opacity: 0.9, fontSize: 13 }}>
-              You’re chatting anonymously. Log in to save and manage conversations.
-            </div>
-          )}
-
-          {token && (
-            <div className="conversation-list">
-              {conversations.map((convo) => (
-                <div
-                  key={convo.id}
-                  className={`convo-item convo-row ${
-                    String(currentConvoId) === String(convo.id) ? 'active' : ''
-                  }`}
-                  onClick={() => openConversation(convo.id)}
-                  title={convo.preview}
-                >
-                  <span className="convo-title">{convo.preview}</span>
-
-                  <button
-                    className="convo-delete-btn"
-                    onClick={(e) => handleDeleteConvo(e, convo.id)}
-                    title="Delete conversation"
-                    aria-label="Delete conversation"
-                  >
-                    {/* inline SVG trash icon */}
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M9 3h6m-8 4h10m-9 0v14a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V7"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M10 11v7M14 11v7"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              ))}
+          {stressLevel && (
+            <div className="stress-summary">
+              <span className="stress-caption">Current check-in:</span>
+              <span className={`stress-pill ${stressLevel}`}>
+                {stressLevelLabels[String(stressLevel).toLowerCase()] || String(stressLevel)}
+              </span>
             </div>
           )}
         </div>
 
-        <div className="chat-main">
-          <div className="chat-container">
-            {showCrisisAlert && (
-              <div className="crisis-banner">
-                <div>
-                  <strong>⚠️ Crisis Support Needed</strong>
-                  <p>Emergency helplines are available 24/7</p>
-                </div>
-                <button onClick={() => setShowCrisisAlert(false)}>×</button>
+        {sidebarOpen && <div className="overlay" onClick={() => setSidebarOpen(false)} />}
+
+        <div className="chat-layout">
+          <aside className={`chat-sidebar ${sidebarOpen ? 'open' : ''}`}>
+            <button className="close-btn" onClick={() => setSidebarOpen(false)} aria-label="Close">
+              ×
+            </button>
+
+            <button className="new-chat-btn" onClick={startNewChat}>
+              + New Chat
+            </button>
+
+            {!token && (
+              <div className="anon-hint">
+                You’re chatting anonymously. Log in to save and manage conversations.
               </div>
             )}
 
-            <div className="chat-header">
-              <h2>Virtual Mental Health Assistant</h2>
-              <p>Academic Stress Support</p>
-              {stressLevel && (
-                <div className="stress-indicator">
-                  <span>Stress Level: </span>
-                  <span className={`stress-badge ${stressLevel}`}>
-                    {String(stressLevel).toUpperCase()}
-                  </span>
+            {token && (
+              <div className="conversation-list">
+                {conversations.map((convo) => (
+                  <div
+                    key={convo.id}
+                    className={`convo-item ${String(currentConvoId) === String(convo.id) ? 'active' : ''}`}
+                    onClick={() => openConversation(convo.id)}
+                    title={convo.preview}
+                  >
+                    <span className="convo-title">{convo.preview}</span>
+                    <button
+                      className="convo-delete-btn"
+                      onClick={(e) => handleDeleteConvo(e, convo.id)}
+                      title="Delete conversation"
+                      aria-label="Delete conversation"
+                    >
+                      <FontAwesomeIcon icon={faTrash} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </aside>
+
+          <main className="chat-main">
+            <div className="chat-panel">
+              {showCrisisAlert && (
+                <div className="crisis-banner">
+                  <div>
+                    <FontAwesomeIcon icon={faExclamationTriangle} /> <strong>Crisis Support Needed</strong>
+                    <p>Emergency helplines are available 24/7</p>
+                  </div>
+                  <button onClick={() => setShowCrisisAlert(false)} aria-label="Close crisis notice">
+                    ×
+                  </button>
                 </div>
               )}
-            </div>
 
-            <div className="messages">
-              {showWelcome && (
-                <div className="welcome-message">
-                  <h3>Welcome</h3>
-                  <p>
-                    Start a new chat to talk about academic stress, deadlines, burnout, exams,
-                    motivation—anything.
-                  </p>
-                  <div style={{ marginTop: 16 }}>
-                    <button
-                      onClick={startNewChat}
-                      style={{
-                        padding: '12px 18px',
-                        borderRadius: 12,
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontWeight: 700,
-                        background: 'linear-gradient(135deg, #66BB6A 0%, #4CAF50 100%)',
-                        color: 'white'
-                      }}
-                    >
+              <div className="messages">
+                {showWelcome && (
+                  <div className="welcome-message">
+                    <h3>Welcome</h3>
+                    <p>Talk about deadlines, burnout, exams, motivation...anything academic-stress related</p>
+                    <button className="welcome-start-btn" onClick={startNewChat}>
                       Start New Chat
                     </button>
                   </div>
-                </div>
-              )}
+                )}
 
-              {messages.map((msg, idx) => (
-                <div key={idx} className={`message ${msg.role}`}>
-                  <p>{msg.content}</p>
-                </div>
-              ))}
+                {messages.map((msg, idx) => (
+                  <div key={idx} className={`row ${msg.role}`}>
+                    <div className={`bubble ${msg.role}`}>
+                      <p>{msg.content}</p>
+                    </div>
+                  </div>
+                ))}
 
-              {loading && <div className="message assistant typing">Typing...</div>}
-              <div ref={messagesEndRef} />
+                {loading && (
+                  <div className="row assistant">
+                    <div className="bubble assistant typing">
+                      <span className="dots">
+                        <i />
+                        <i />
+                        <i />
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div ref={messagesEndRef} />
+              </div>
+
+              <div className="input-area">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                  placeholder="Share what's on your mind..."
+                  disabled={loading}
+                />
+                <button onClick={handleSend} disabled={loading}>
+                  {loading ? 'Sending...' : 'Send'}
+                </button>
+              </div>
             </div>
-
-            <div className="input-area">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Share what's on your mind..."
-                disabled={loading}
-              />
-              <button onClick={handleSend} disabled={loading}>
-                {loading ? 'Sending...' : 'Send'}
-              </button>
-            </div>
-          </div>
+          </main>
         </div>
       </div>
 
