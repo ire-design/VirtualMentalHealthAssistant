@@ -14,10 +14,7 @@ migrate = Migrate()
 
 app = Flask(__name__)
 
-@app.before_request
-def _handle_preflight():
-    if request.method == "OPTIONS":
-        return "", 204
+
 
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -25,7 +22,10 @@ db_sql.init_app(app)
 migrate.init_app(app, db_sql)
 CORS(
     app,
-    resources={r"/*": {"origins": ""}},
+    resources={r"/*": {"origins": [
+        "https://virtual-mental-health-assistant.vercel.app",
+        "http://localhost:5173"
+    ]}},
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     max_age=86400
