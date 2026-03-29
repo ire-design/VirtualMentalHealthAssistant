@@ -18,7 +18,15 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db_sql.init_app(app)
 migrate.init_app(app, db_sql)
-CORS(app)
+CORS(
+    app,
+    resources={r"/*": {"origins": [
+        "https://virtual-mental-health-assistant.vercel.app",
+        "http://localhost:5173"
+    ]}},
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "dev-secret-change-me")
