@@ -1,7 +1,6 @@
 import axios from 'axios';
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
 const authHeaders = () => {
   const token = localStorage.getItem('token');
@@ -47,11 +46,7 @@ export const getConversations = async () => {
 };
 
 export const createConversation = async () => {
-  const response = await axios.post(
-    `${API_BASE_URL}/conversation/new`,
-    {},
-    { headers: authHeaders() }
-  );
+  const response = await axios.post(`${API_BASE_URL}/conversation/new`, {}, { headers: authHeaders() });
   return response.data;
 };
 
@@ -82,5 +77,28 @@ export const getDashboardSummary = async () => {
   const response = await axios.get(`${API_BASE_URL}/dashboard/summary`, {
     headers: authHeaders()
   });
+  return response.data;
+};
+
+export const getDashboardInsights = async (days = 7) => {
+  const response = await axios.get(`${API_BASE_URL}/dashboard/insights?days=${encodeURIComponent(days)}`, {
+    headers: authHeaders()
+  });
+  return response.data;
+};
+
+export const getMoods = async (days = 30) => {
+  const response = await axios.get(`${API_BASE_URL}/mood?days=${encodeURIComponent(days)}`, {
+    headers: authHeaders()
+  });
+  return response.data;
+};
+
+export const saveMood = async ({ mood, tags = [], note = '', date = '' }) => {
+  const response = await axios.post(
+    `${API_BASE_URL}/mood`,
+    { mood, tags, note, date },
+    { headers: authHeaders() }
+  );
   return response.data;
 };
