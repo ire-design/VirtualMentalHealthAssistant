@@ -3,10 +3,12 @@ import os
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timezone
 
-USERS_FILE = "users.json"
-CONVOS_FILE = "conversations.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# How long we keep deleted conversations available for undo
+USERS_FILE = os.path.join(BASE_DIR, "users.json")
+CONVOS_FILE = os.path.join(BASE_DIR, "conversations.json")
+MOODS_FILE = os.path.join(BASE_DIR, "moods.json")
+
 UNDO_TTL_SECONDS = 30
 
 
@@ -16,6 +18,9 @@ def init_db():
             json.dump({}, f)
     if not os.path.exists(CONVOS_FILE):
         with open(CONVOS_FILE, "w") as f:
+            json.dump({}, f)
+    if not os.path.exists(MOODS_FILE):
+        with open(MOODS_FILE, "w") as f:
             json.dump({}, f)
 
 
@@ -45,10 +50,6 @@ def _parse_iso(s):
 
 
 def _ensure_user_bucket(convos_root, email):
-    """
-    Supports legacy format where convos_root[email] is a list.
-    Migrates to {"active": [...], "deleted": [...]}.
-    """
     if email not in convos_root:
         convos_root[email] = {"active": [], "deleted": []}
         return convos_root[email]
@@ -57,7 +58,6 @@ def _ensure_user_bucket(convos_root, email):
         convos_root[email] = {"active": convos_root[email], "deleted": []}
         return convos_root[email]
 
-    # expected dict
     if "active" not in convos_root[email]:
         convos_root[email]["active"] = []
     if "deleted" not in convos_root[email]:
@@ -67,9 +67,6 @@ def _ensure_user_bucket(convos_root, email):
 
 
 def _prune_deleted(bucket):
-    """
-    Remove deleted convos older than UNDO_TTL_SECONDS.
-    """
     keep = []
     now = datetime.now(timezone.utc)
 
@@ -84,9 +81,6 @@ def _prune_deleted(bucket):
     bucket["deleted"] = keep
 
 
-# -------------------------
-# Users
-# -------------------------
 def create_user(email, password, name):
     users = _read_json(USERS_FILE, {})
     if email in users:
@@ -107,9 +101,6 @@ def verify_user(email, password):
     return None
 
 
-# -------------------------
-# Conversations
-# -------------------------
 def _load_convos_root():
     return _read_json(CONVOS_FILE, {})
 
@@ -119,6 +110,9 @@ def _save_convos_root(root):
 
 
 def create_conversation(email):
+    if not email:
+        return
+
     root = _load_convos_root()
     bucket = _ensure_user_bucket(root, email)
     _prune_deleted(bucket)
@@ -137,6 +131,9 @@ def create_conversation(email):
 
 
 def save_message(email, convo_id, role, content):
+    if not email:
+        return
+
     root = _load_convos_root()
     bucket = _ensure_user_bucket(root, email)
     _prune_deleted(bucket)
@@ -144,7 +141,6 @@ def save_message(email, convo_id, role, content):
     convo_id = str(convo_id)
     convo = next((c for c in bucket["active"] if str(c.get("id")) == convo_id), None)
 
-    # If convo missing, create one (fallback)
     if convo is None:
         convo_id = create_conversation(email)
         root = _load_convos_root()
@@ -163,6 +159,8 @@ def save_message(email, convo_id, role, content):
 
 
 def get_conversations(email):
+    if not email:
+        return []
     root = _load_convos_root()
     bucket = _ensure_user_bucket(root, email)
     _prune_deleted(bucket)
@@ -171,6 +169,8 @@ def get_conversations(email):
 
 
 def get_conversation(email, convo_id):
+    if not email:
+        return []
     convo_id = str(convo_id)
     for convo in get_conversations(email):
         if str(convo.get("id")) == convo_id:
@@ -179,10 +179,9 @@ def get_conversation(email, convo_id):
 
 
 def soft_delete_conversation(email, convo_id):
-    """
-    Move convo from active -> deleted bucket.
-    Returns the deleted convo object (wrapped) or None if not found.
-    """
+    if not email:
+        return None
+
     root = _load_convos_root()
     bucket = _ensure_user_bucket(root, email)
     _prune_deleted(bucket)
@@ -206,10 +205,8 @@ def soft_delete_conversation(email, convo_id):
 
 
 def undo_delete_conversation(email, convo_id):
-    """
-    Restore a deleted convo if still within TTL.
-    Returns restored conversation or None.
-    """
+    if not email:
+        return None
     root = _load_convos_root()
     bucket = _ensure_user_bucket(root, email)
     _prune_deleted(bucket)
@@ -224,7 +221,6 @@ def undo_delete_conversation(email, convo_id):
     item = bucket["deleted"].pop(idx)
     convo = item.get("conversation")
 
-    # Restore to active
     if convo:
         bucket["active"].append(convo)
         _save_convos_root(root)
@@ -232,3 +228,52 @@ def undo_delete_conversation(email, convo_id):
 
     _save_convos_root(root)
     return None
+
+
+def _load_moods_root():
+    return _read_json(MOODS_FILE, {})
+
+
+def _save_moods_root(root):
+    _write_json(MOODS_FILE, root)
+
+
+def upsert_mood(email, date, mood, tags=None, note=""):
+    if not email:
+        return None
+
+    root = _load_moods_root()
+    items = root.get(email, [])
+    if not isinstance(items, list):
+        items = []
+
+    date = str(date)
+    existing = next((m for m in items if str(m.get("date")) == date), None)
+
+    entry = {
+        "date": date,
+        "mood": mood,
+        "tags": tags or [],
+        "note": note or "",
+        "timestamp": _now_iso(),
+    }
+
+    if existing:
+        existing.update(entry)
+    else:
+        items.append(entry)
+
+    items_sorted = sorted(items, key=lambda x: (x.get("date") or "", x.get("timestamp") or ""), reverse=False)
+    root[email] = items_sorted
+    _save_moods_root(root)
+    return entry
+
+
+def get_moods(email):
+    if not email:
+        return []
+    root = _load_moods_root()
+    items = root.get(email, [])
+    if not isinstance(items, list):
+        return []
+    return items
