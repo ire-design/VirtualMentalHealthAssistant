@@ -1,279 +1,175 @@
-import json
-import os
+from models import db_sql, User, Conversation, Message, Mood
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timezone
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-USERS_FILE = os.path.join(BASE_DIR, "users.json")
-CONVOS_FILE = os.path.join(BASE_DIR, "conversations.json")
-MOODS_FILE = os.path.join(BASE_DIR, "moods.json")
+import json
 
 UNDO_TTL_SECONDS = 30
 
-
-def init_db():
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w") as f:
-            json.dump({}, f)
-    if not os.path.exists(CONVOS_FILE):
-        with open(CONVOS_FILE, "w") as f:
-            json.dump({}, f)
-    if not os.path.exists(MOODS_FILE):
-        with open(MOODS_FILE, "w") as f:
-            json.dump({}, f)
-
-
-def _read_json(path, default):
-    init_db()
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return default
-
-
-def _write_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f)
-
+def _now():
+    return datetime.now(timezone.utc)
 
 def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
-
+    return _now().isoformat()
 
 def _parse_iso(s):
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return datetime.fromisoformat((s or "").replace("Z", "+00:00"))
     except Exception:
         return None
 
-
-def _ensure_user_bucket(convos_root, email):
-    if email not in convos_root:
-        convos_root[email] = {"active": [], "deleted": []}
-        return convos_root[email]
-
-    if isinstance(convos_root[email], list):
-        convos_root[email] = {"active": convos_root[email], "deleted": []}
-        return convos_root[email]
-
-    if "active" not in convos_root[email]:
-        convos_root[email]["active"] = []
-    if "deleted" not in convos_root[email]:
-        convos_root[email]["deleted"] = []
-
-    return convos_root[email]
-
-
-def _prune_deleted(bucket):
-    keep = []
-    now = datetime.now(timezone.utc)
-
-    for item in bucket.get("deleted", []):
-        deleted_at = _parse_iso(item.get("deleted_at", ""))
-        if not deleted_at:
-            continue
-        age = (now - deleted_at).total_seconds()
-        if age <= UNDO_TTL_SECONDS:
-            keep.append(item)
-
-    bucket["deleted"] = keep
-
+def init_db():
+    return
 
 def create_user(email, password, name):
-    users = _read_json(USERS_FILE, {})
-    if email in users:
+    email = (email or "").strip().lower()
+    name = (name or "").strip()
+    if not email or not password or not name:
         return None
-
-    users[email] = {"password": generate_password_hash(password), "name": name}
-    _write_json(USERS_FILE, users)
-    return {"email": email, "name": name}
-
+    existing = User.query.get(email)
+    if existing:
+        return None
+    u = User(email=email, name=name, password_hash=generate_password_hash(password))
+    db_sql.session.add(u)
+    db_sql.session.commit()
+    return {"email": u.email, "name": u.name}
 
 def verify_user(email, password):
-    users = _read_json(USERS_FILE, {})
-    if email not in users:
+    email = (email or "").strip().lower()
+    if not email or not password:
         return None
-
-    if check_password_hash(users[email]["password"], password):
-        return {"email": email, "name": users[email]["name"]}
-    return None
-
-
-def _load_convos_root():
-    return _read_json(CONVOS_FILE, {})
-
-
-def _save_convos_root(root):
-    _write_json(CONVOS_FILE, root)
-
+    u = User.query.get(email)
+    if not u:
+        return None
+    if not check_password_hash(u.password_hash, password):
+        return None
+    return {"email": u.email, "name": u.name}
 
 def create_conversation(email):
+    email = (email or "").strip().lower()
     if not email:
-        return
-
-    root = _load_convos_root()
-    bucket = _ensure_user_bucket(root, email)
-    _prune_deleted(bucket)
-
-    existing_ids = {str(c.get("id")) for c in bucket["active"]}
-    next_id = 0
-    while str(next_id) in existing_ids:
-        next_id += 1
-
-    convo_id = str(next_id)
-    new_convo = {"id": convo_id, "created_at": _now_iso(), "messages": []}
-
-    bucket["active"].append(new_convo)
-    _save_convos_root(root)
-    return convo_id
-
+        return None
+    convo = Conversation(user_email=email, created_at=_now())
+    db_sql.session.add(convo)
+    db_sql.session.commit()
+    return str(convo.id)
 
 def save_message(email, convo_id, role, content):
+    email = (email or "").strip().lower()
     if not email:
         return
-
-    root = _load_convos_root()
-    bucket = _ensure_user_bucket(root, email)
-    _prune_deleted(bucket)
-
-    convo_id = str(convo_id)
-    convo = next((c for c in bucket["active"] if str(c.get("id")) == convo_id), None)
-
+    if convo_id is None:
+        convo_id = create_conversation(email)
+    try:
+        convo_id_int = int(str(convo_id))
+    except Exception:
+        convo_id_int = None
+    convo = None
+    if convo_id_int is not None:
+        convo = Conversation.query.filter_by(id=convo_id_int, user_email=email).first()
     if convo is None:
         convo_id = create_conversation(email)
-        root = _load_convos_root()
-        bucket = _ensure_user_bucket(root, email)
-        convo = next((c for c in bucket["active"] if str(c.get("id")) == str(convo_id)), None)
+        try:
+            convo_id_int = int(str(convo_id))
+        except Exception:
+            return
+        convo = Conversation.query.filter_by(id=convo_id_int, user_email=email).first()
+    msg = Message(conversation_id=convo.id, role=str(role), content=str(content), timestamp=_now())
+    db_sql.session.add(msg)
+    db_sql.session.commit()
 
-    if convo is not None:
-        convo["messages"].append(
-            {
-                "role": role,
-                "content": content,
-                "timestamp": _now_iso(),
-            }
-        )
-        _save_convos_root(root)
-
+def _conversation_to_dict(convo):
+    msgs = Message.query.filter_by(conversation_id=convo.id).order_by(Message.timestamp.asc()).all()
+    return {
+        "id": str(convo.id),
+        "created_at": convo.created_at.isoformat() if convo.created_at else None,
+        "messages": [{"role": m.role, "content": m.content, "timestamp": m.timestamp.isoformat() if m.timestamp else None} for m in msgs],
+    }
 
 def get_conversations(email):
+    email = (email or "").strip().lower()
     if not email:
         return []
-    root = _load_convos_root()
-    bucket = _ensure_user_bucket(root, email)
-    _prune_deleted(bucket)
-    _save_convos_root(root)
-    return bucket["active"]
-
+    convos = Conversation.query.filter_by(user_email=email, deleted_at=None).order_by(Conversation.created_at.desc()).all()
+    return [_conversation_to_dict(c) for c in convos]
 
 def get_conversation(email, convo_id):
+    email = (email or "").strip().lower()
     if not email:
-        return []
-    convo_id = str(convo_id)
-    for convo in get_conversations(email):
-        if str(convo.get("id")) == convo_id:
-            return convo
-    return None
-
+        return None
+    try:
+        convo_id_int = int(str(convo_id))
+    except Exception:
+        return None
+    convo = Conversation.query.filter_by(id=convo_id_int, user_email=email, deleted_at=None).first()
+    if not convo:
+        return None
+    return _conversation_to_dict(convo)
 
 def soft_delete_conversation(email, convo_id):
+    email = (email or "").strip().lower()
     if not email:
         return None
-
-    root = _load_convos_root()
-    bucket = _ensure_user_bucket(root, email)
-    _prune_deleted(bucket)
-
-    convo_id = str(convo_id)
-    idx = next((i for i, c in enumerate(bucket["active"]) if str(c.get("id")) == convo_id), None)
-    if idx is None:
+    try:
+        convo_id_int = int(str(convo_id))
+    except Exception:
         return None
-
-    convo = bucket["active"].pop(idx)
-
-    deleted_item = {
-        "id": convo_id,
-        "deleted_at": _now_iso(),
-        "conversation": convo,
-    }
-    bucket["deleted"].append(deleted_item)
-
-    _save_convos_root(root)
-    return deleted_item
-
+    convo = Conversation.query.filter_by(id=convo_id_int, user_email=email, deleted_at=None).first()
+    if not convo:
+        return None
+    convo.deleted_at = _now()
+    db_sql.session.commit()
+    return {"id": str(convo.id), "deleted_at": convo.deleted_at.isoformat()}
 
 def undo_delete_conversation(email, convo_id):
+    email = (email or "").strip().lower()
     if not email:
         return None
-    root = _load_convos_root()
-    bucket = _ensure_user_bucket(root, email)
-    _prune_deleted(bucket)
-
-    convo_id = str(convo_id)
-
-    idx = next((i for i, d in enumerate(bucket["deleted"]) if str(d.get("id")) == convo_id), None)
-    if idx is None:
-        _save_convos_root(root)
+    try:
+        convo_id_int = int(str(convo_id))
+    except Exception:
         return None
-
-    item = bucket["deleted"].pop(idx)
-    convo = item.get("conversation")
-
-    if convo:
-        bucket["active"].append(convo)
-        _save_convos_root(root)
-        return convo
-
-    _save_convos_root(root)
-    return None
-
-
-def _load_moods_root():
-    return _read_json(MOODS_FILE, {})
-
-
-def _save_moods_root(root):
-    _write_json(MOODS_FILE, root)
-
+    convo = Conversation.query.filter_by(id=convo_id_int, user_email=email).first()
+    if not convo or not convo.deleted_at:
+        return None
+    age = (_now() - convo.deleted_at).total_seconds()
+    if age > UNDO_TTL_SECONDS:
+        return None
+    convo.deleted_at = None
+    db_sql.session.commit()
+    return _conversation_to_dict(convo)
 
 def upsert_mood(email, date, mood, tags=None, note=""):
+    email = (email or "").strip().lower()
     if not email:
         return None
-
-    root = _load_moods_root()
-    items = root.get(email, [])
-    if not isinstance(items, list):
-        items = []
-
     date = str(date)
-    existing = next((m for m in items if str(m.get("date")) == date), None)
-
-    entry = {
-        "date": date,
-        "mood": mood,
-        "tags": tags or [],
-        "note": note or "",
-        "timestamp": _now_iso(),
-    }
-
-    if existing:
-        existing.update(entry)
+    tags_list = tags if isinstance(tags, list) else []
+    tags_json = json.dumps(tags_list)
+    entry = Mood.query.filter_by(user_email=email, date=date).first()
+    now = _now()
+    if entry:
+        entry.mood = mood
+        entry.tags_json = tags_json
+        entry.note = note or ""
+        entry.updated_at = now
     else:
-        items.append(entry)
-
-    items_sorted = sorted(items, key=lambda x: (x.get("date") or "", x.get("timestamp") or ""), reverse=False)
-    root[email] = items_sorted
-    _save_moods_root(root)
-    return entry
-
+        entry = Mood(user_email=email, date=date, mood=mood, tags_json=tags_json, note=note or "", created_at=now, updated_at=now)
+        db_sql.session.add(entry)
+    db_sql.session.commit()
+    return {"date": entry.date, "mood": entry.mood, "tags": json.loads(entry.tags_json or "[]"), "note": entry.note, "timestamp": entry.updated_at.isoformat() if entry.updated_at else _now_iso()}
 
 def get_moods(email):
+    email = (email or "").strip().lower()
     if not email:
         return []
-    root = _load_moods_root()
-    items = root.get(email, [])
-    if not isinstance(items, list):
-        return []
-    return items
+    rows = Mood.query.filter_by(user_email=email).order_by(Mood.date.asc()).all()
+    result = []
+    for r in rows:
+        result.append({
+            "date": r.date,
+            "mood": r.mood,
+            "tags": json.loads(r.tags_json or "[]"),
+            "note": r.note,
+            "timestamp": (r.updated_at or r.created_at).isoformat() if (r.updated_at or r.created_at) else _now_iso(),
+        })
+    return result
