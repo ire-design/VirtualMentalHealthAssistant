@@ -25,10 +25,7 @@ db_sql.init_app(app)
 migrate.init_app(app, db_sql)
 CORS(
     app,
-    resources={r"/*": {"origins": [
-        "https://virtual-mental-health-assistant.vercel.app",
-        "http://localhost:5173"
-    ]}},
+    resources={r"/*": {"origins": ""}},
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     max_age=86400
