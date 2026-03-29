@@ -5,18 +5,25 @@ from sentence_transformers import SentenceTransformer
 import requests
 import os
 from dotenv import load_dotenv
-from flask_jwt_extended import (
-    JWTManager,
-    create_access_token,
-    jwt_required,
-    get_jwt_identity,
-)
+from flask_jwt_extended import (JWTManager,create_access_token,jwt_required,get_jwt_identity,)
 from datetime import timedelta, datetime, timezone
 import db
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 
 load_dotenv()
 
+db_sql = SQLAlchemy()
+migrate = Migrate()
+
 app = Flask(__name__)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db_sql.init_app(app)
+migrate.init_app(app, db_sql)
+
 CORS(app)
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
@@ -46,27 +53,7 @@ MIN_QUERY_CHARS_FOR_RETRIEVAL = 12
 PINECONE_SCORE_THRESHOLD = 0.78
 MAX_CONTEXT_MATCHES = 3
 
-SKIP_RETRIEVAL_EXACT = {
-    "hi",
-    "hey",
-    "hello",
-    "yoh",
-    "niaje",
-    "sasa",
-    "mambo",
-    "lol",
-    "ok",
-    "okay",
-    "no",
-    "noo",
-    "yes",
-    "yeah",
-    "yep",
-    "sure",
-    "thanks",
-    "thank you",
-}
-
+SKIP_RETRIEVAL_EXACT = {"hi", "hey", "hello", "yoh", "niaje", "sasa", "mambo", "lol", "ok", "okay", "no", "noo", "yes", "yeah", "yep", "sure", "thanks", "thank you"}
 
 def sanitize_history(history):
     if not isinstance(history, list):
@@ -93,7 +80,6 @@ def sanitize_history(history):
 
     return cleaned[-20:]
 
-
 def is_short_greeting(message: str) -> bool:
     msg = (message or "").strip().lower()
     if not msg:
@@ -104,7 +90,6 @@ def is_short_greeting(message: str) -> bool:
         return True
     return False
 
-
 def local_smalltalk_reply(message: str) -> str:
     msg = (message or "").strip().lower()
     if msg in {"hi", "hey", "hello", "hello there", "niaje", "sasa", "mambo", "yoh"}:
@@ -114,7 +99,6 @@ def local_smalltalk_reply(message: str) -> str:
     if msg in {"thanks", "thank you"}:
         return "You’re welcome. I’m here with you."
     return "I’m here. If you want, tell me what’s going on with school or your stress right now."
-
 
 def retrieve_context(question: str) -> str:
     if not index or not model:
@@ -153,7 +137,6 @@ def retrieve_context(question: str) -> str:
     except Exception as e:
         print("Pinecone Error:", e)
         return ""
-
 
 def ask_llm(question: str, context: str, history=None) -> str:
     if not OPENROUTER_API_KEY:
@@ -256,62 +239,16 @@ CRISIS HANDLING RULES:
         print("LLM Error:", e)
         return "AI service unavailable."
 
-
-CRISIS_KEYWORDS = [
-    "suicide",
-    "suicidal",
-    "kill myself",
-    "end my life",
-    "want to die",
-    "self harm",
-    "hurt myself",
-    "can't go on",
-    "dropping out",
-    "quit school",
-    "no way out",
-    "can't continue university",
-    "hopelessness",
-    "giving up on life",
-]
-
+CRISIS_KEYWORDS = ["suicide", "suicidal", "kill myself", "end my life", "want to die", "self harm", "hurt myself", "can't go on", "dropping out", "quit school", "no way out", "can't continue university", "hopelessness", "giving up on life"]
 
 def is_crisis(message: str) -> bool:
     return any(keyword in (message or "").lower() for keyword in CRISIS_KEYWORDS)
 
-
 def assess_stress_level(message: str) -> str:
     message_lower = (message or "").lower()
 
-    severe_keywords = [
-        "can't cope",
-        "overwhelming",
-        "breaking down",
-        "mental breakdown",
-        "can't sleep",
-        "panic attack",
-        "anxiety attack",
-        "severe stress",
-        "extremely stressed",
-        "too much pressure",
-        "can't handle",
-    ]
-    moderate_keywords = [
-        "stressed",
-        "anxious",
-        "worried",
-        "nervous",
-        "pressure",
-        "difficult",
-        "struggling",
-        "exhausted",
-        "tired",
-        "overwhelmed",
-        "hectic",
-        "might quit",
-        "want to quit",
-        "quit school",
-        "drop out",
-    ]
+    severe_keywords = ["can't cope", "overwhelming", "breaking down", "mental breakdown", "can't sleep", "panic attack", "anxiety attack", "severe stress", "extremely stressed", "too much pressure", "can't handle"]
+    moderate_keywords = ["stressed", "anxious", "worried", "nervous", "pressure", "difficult", "struggling", "exhausted", "tired", "overwhelmed", "hectic", "might quit", "want to quit", "quit school", "drop out"]
 
     if any(k in message_lower for k in severe_keywords):
         return "severe"
@@ -319,13 +256,11 @@ def assess_stress_level(message: str) -> str:
         return "moderate"
     return "low"
 
-
 def _parse_iso(s):
     try:
         return datetime.fromisoformat((s or "").replace("Z", "+00:00"))
     except Exception:
         return None
-
 
 def _within_days(ts_iso, days):
     dt = _parse_iso(ts_iso)
@@ -334,44 +269,13 @@ def _within_days(ts_iso, days):
     now = datetime.now(timezone.utc)
     return (now - dt).total_seconds() <= days * 24 * 3600
 
-
 THEME_KEYWORDS = {
-    "academics": [
-        "exam",
-        "exams",
-        "midterm",
-        "finals",
-        "quiz",
-        "cat",
-        "assignment",
-        "deadline",
-        "coursework",
-        "thesis",
-        "dissertation",
-        "submission",
-        "project",
-        "presentation",
-        "grades",
-        "gpa",
-        "fail",
-        "failing",
-        "marks",
-        "study",
-        "studying",
-        "revision",
-        "lecture",
-        "semester",
-        "unit",
-        "units",
-        "syllabus",
-        "timetable",
-    ],
+    "academics": ["exam", "exams", "midterm", "finals", "quiz", "cat", "assignment", "deadline", "coursework", "thesis", "dissertation", "submission", "project", "presentation", "grades", "gpa", "fail", "failing", "marks", "study", "studying", "revision", "lecture", "semester", "unit", "units", "syllabus", "timetable"],
     "sleep": ["sleep", "insomnia", "can't sleep", "tired", "exhausted", "sleep deprived"],
     "money": ["fees", "helb", "bursary", "upkeep", "rent", "money", "financial"],
     "relationships": ["boyfriend", "girlfriend", "breakup", "relationship", "heartbreak"],
     "motivation": ["procrastination", "motivation", "focus", "concentration", "distracted"],
 }
-
 
 def _themes_for_text(txt):
     t = (txt or "").lower()
@@ -381,11 +285,9 @@ def _themes_for_text(txt):
             hits.append(theme)
     return hits
 
-
 @app.route("/")
 def home():
     return "Virtual Mental Health Assistant Backend is running"
-
 
 @app.route("/chat", methods=["POST"])
 @jwt_required(optional=True)
@@ -442,7 +344,6 @@ def chat():
         print("Chat Endpoint Error:", e)
         return jsonify({"reply": "Server error occurred."}), 500
 
-
 @app.route("/register", methods=["POST"])
 def register():
     data = request.get_json(silent=True) or {}
@@ -460,7 +361,6 @@ def register():
     token = create_access_token(identity=email)
     return jsonify({"token": token, "user": user}), 201
 
-
 @app.route("/login", methods=["POST"])
 def login():
     data = request.get_json(silent=True) or {}
@@ -473,7 +373,6 @@ def login():
 
     token = create_access_token(identity=email)
     return jsonify({"token": token, "user": user}), 200
-
 
 @app.route("/conversations", methods=["GET"])
 @jwt_required()
@@ -501,7 +400,6 @@ def get_user_conversations():
 
     return jsonify({"conversations": result}), 200
 
-
 @app.route("/conversation/<convo_id>", methods=["GET"])
 @jwt_required()
 def get_conversation(convo_id):
@@ -513,14 +411,12 @@ def get_conversation(convo_id):
 
     return jsonify(convo), 200
 
-
 @app.route("/conversation/new", methods=["POST"])
 @jwt_required()
 def new_conversation():
     email = get_jwt_identity()
     convo_id = db.create_conversation(email)
     return jsonify({"convo_id": convo_id}), 201
-
 
 @app.route("/conversation/<convo_id>", methods=["DELETE"])
 @jwt_required()
@@ -692,7 +588,6 @@ def upsert_mood():
 
     entry = db.upsert_mood(email, date, mood, tags=tags, note=note)
     return jsonify({"saved": True, "mood": entry}), 201
-
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
