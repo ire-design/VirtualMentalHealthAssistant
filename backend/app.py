@@ -11,7 +11,7 @@ from flask_jwt_extended import (
     jwt_required,
     get_jwt_identity,
 )
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 import db
 
 load_dotenv()
@@ -42,26 +42,117 @@ if PINECONE_API_KEY:
 else:
     print("PINECONE_API_KEY missing. Context retrieval will be skipped.")
 
+MIN_QUERY_CHARS_FOR_RETRIEVAL = 12
+PINECONE_SCORE_THRESHOLD = 0.78
+MAX_CONTEXT_MATCHES = 3
+
+SKIP_RETRIEVAL_EXACT = {
+    "hi",
+    "hey",
+    "hello",
+    "yoh",
+    "niaje",
+    "sasa",
+    "mambo",
+    "lol",
+    "ok",
+    "okay",
+    "no",
+    "noo",
+    "yes",
+    "yeah",
+    "yep",
+    "sure",
+    "thanks",
+    "thank you",
+}
+
+
+def sanitize_history(history):
+    if not isinstance(history, list):
+        return []
+
+    cleaned = []
+    for msg in history:
+        if not isinstance(msg, dict):
+            continue
+
+        role = (msg.get("role") or "").strip()
+        content = msg.get("content")
+
+        if role not in ("user", "assistant"):
+            continue
+        if not isinstance(content, str):
+            continue
+
+        content = content.strip()
+        if not content:
+            continue
+
+        cleaned.append({"role": role, "content": content})
+
+    return cleaned[-20:]
+
+
+def is_short_greeting(message: str) -> bool:
+    msg = (message or "").strip().lower()
+    if not msg:
+        return True
+    if msg in SKIP_RETRIEVAL_EXACT:
+        return True
+    if len(msg) <= 5 and msg in {"hi", "hey", "yo", "yoh"}:
+        return True
+    return False
+
+
+def local_smalltalk_reply(message: str) -> str:
+    msg = (message or "").strip().lower()
+    if msg in {"hi", "hey", "hello", "hello there", "niaje", "sasa", "mambo", "yoh"}:
+        return "Hey. I’m here with you. If school has been heavy lately, you can share what’s been hardest."
+    if msg in {"ok", "okay", "sure"}:
+        return "Alright. I’m here—whenever you’re ready, you can share what’s weighing on you."
+    if msg in {"thanks", "thank you"}:
+        return "You’re welcome. I’m here with you."
+    return "I’m here. If you want, tell me what’s going on with school or your stress right now."
+
 
 def retrieve_context(question: str) -> str:
     if not index or not model:
-        return "No relevant context found."
+        return ""
+
+    q = (question or "").strip()
+    q_lower = q.lower()
+
+    if len(q) < MIN_QUERY_CHARS_FOR_RETRIEVAL or q_lower in SKIP_RETRIEVAL_EXACT:
+        return ""
+
     try:
-        query_vector = model.encode(question).tolist()
-        results = index.query(vector=query_vector, top_k=3, include_metadata=True)
+        query_vector = model.encode(q).tolist()
+        results = index.query(
+            vector=query_vector, top_k=MAX_CONTEXT_MATCHES, include_metadata=True
+        )
 
-        if results.matches and len(results.matches) > 0:
-            context = [
-                match.metadata["text"]
-                for match in results.matches
-                if match.metadata and "text" in match.metadata
-            ]
-            return "\n\n---\n\n".join(context)
+        matches = getattr(results, "matches", None) or []
+        if not matches:
+            return ""
 
-        return "No relevant context found."
+        top = matches[0]
+        top_score = getattr(top, "score", None)
+        if top_score is not None and top_score < PINECONE_SCORE_THRESHOLD:
+            return ""
+
+        context_chunks = []
+        for m in matches:
+            md = getattr(m, "metadata", None) or {}
+            txt = md.get("text")
+            if txt:
+                context_chunks.append(txt)
+
+        return "\n\n---\n\n".join(context_chunks).strip()
+
     except Exception as e:
         print("Pinecone Error:", e)
-        return "Context retrieval failed."
+        return ""
 
 
 def ask_llm(question: str, context: str, history=None) -> str:
@@ -77,7 +168,11 @@ def ask_llm(question: str, context: str, history=None) -> str:
 You are a warm, emotionally intelligent mental health support assistant
 for Kenyan university students experiencing academic stress.
 
-Your personality:
+CORE ROLE:
+- You exist ONLY to support mental health and academic stress.
+- You may casually engage, but must gently steer conversations back to academic stress and mental wellbeing.
+
+STYLE:
 - Calm, human, natural (not robotic)
 - Supportive but not overly clinical
 - Remember personal details shared in the conversation
@@ -85,17 +180,19 @@ Your personality:
 - Follow formatting requests (brief, detailed, etc.)
 - If the user gets frustrated, adjust tone immediately
 - Respond in flowing, conversational prose. No bullet points or numbered lists unless explicitly asked.
-Do NOT ask questions unless the user explicitly invites them.
+- Do NOT ask questions unless the user explicitly invites them.
 
-Never reference "context", "documents", or any internal data sources in your responses.
-Integrate knowledge naturally as if it's your own understanding.
-
-If the user asks you to stop asking questions, STOP immediately and never ask another question unless they explicitly invite it.
-Adapt your style based on direct feedback and never revert back.
-
-Internally assess stress as low, moderate, or severe and adjust your tone accordingly.
+IMPORTANT:
+- Always respond primarily to the user's last message.
+- You may receive optional background text. Use it ONLY if it is clearly relevant.
+- Never mention or refer to any background/context/documents.
 
 You are not a therapist. You are a supportive, emotionally aware assistant.
+
+CRISIS HANDLING RULES:
+- If user expresses suicidal thoughts, do not abandon them.
+- Respond with empathy, then suggest external help (helplines).
+- Stay calm, human, supportive; do not be repetitive.
 """.strip()
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -103,23 +200,58 @@ You are not a therapist. You are a supportive, emotionally aware assistant.
     if history and isinstance(history, list):
         messages.extend(history)
 
-    messages.append({"role": "user", "content": f"Relevant context:\n{context}\n\n{question}"})
+    if context and isinstance(context, str) and context.strip():
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "Optional background text for the assistant. "
+                    "Use only if clearly relevant to the user's last message. "
+                    "Do not mention or quote it.\n\n"
+                    f"{context.strip()}"
+                ),
+            }
+        )
 
-    payload = {"model": "openai/gpt-3.5-turbo", "messages": messages, "temperature": 0.4}
+    messages.append({"role": "user", "content": question})
+
+    payload = {
+        "model": "openai/gpt-3.5-turbo",
+        "messages": messages,
+        "temperature": 0.4,
+    }
 
     try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
+        last_err = None
+        for attempt in range(3):
+            try:
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=30,
+                )
 
-        if "choices" in data and data["choices"]:
-            return data["choices"][0]["message"]["content"]
-        return "Sorry, I'm having trouble responding right now."
+                if response.status_code >= 400:
+                    print("OpenRouter HTTP", response.status_code, response.text[:500])
+
+                response.raise_for_status()
+                data = response.json()
+
+                if "choices" in data and data["choices"]:
+                    return data["choices"][0]["message"]["content"]
+
+                return "Sorry, I'm having trouble responding right now."
+
+            except Exception as e:
+                last_err = e
+                import time
+
+                time.sleep(0.8 * (attempt + 1))
+
+        print("LLM Error (after retries):", last_err)
+        return "AI service unavailable."
+
     except Exception as e:
         print("LLM Error:", e)
         return "AI service unavailable."
@@ -174,6 +306,11 @@ def assess_stress_level(message: str) -> str:
         "exhausted",
         "tired",
         "overwhelmed",
+        "hectic",
+        "might quit",
+        "want to quit",
+        "quit school",
+        "drop out",
     ]
 
     if any(k in message_lower for k in severe_keywords):
@@ -181,6 +318,68 @@ def assess_stress_level(message: str) -> str:
     if any(k in message_lower for k in moderate_keywords):
         return "moderate"
     return "low"
+
+
+def _parse_iso(s):
+    try:
+        return datetime.fromisoformat((s or "").replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _within_days(ts_iso, days):
+    dt = _parse_iso(ts_iso)
+    if not dt:
+        return False
+    now = datetime.now(timezone.utc)
+    return (now - dt).total_seconds() <= days * 24 * 3600
+
+
+THEME_KEYWORDS = {
+    "academics": [
+        "exam",
+        "exams",
+        "midterm",
+        "finals",
+        "quiz",
+        "cat",
+        "assignment",
+        "deadline",
+        "coursework",
+        "thesis",
+        "dissertation",
+        "submission",
+        "project",
+        "presentation",
+        "grades",
+        "gpa",
+        "fail",
+        "failing",
+        "marks",
+        "study",
+        "studying",
+        "revision",
+        "lecture",
+        "semester",
+        "unit",
+        "units",
+        "syllabus",
+        "timetable",
+    ],
+    "sleep": ["sleep", "insomnia", "can't sleep", "tired", "exhausted", "sleep deprived"],
+    "money": ["fees", "helb", "bursary", "upkeep", "rent", "money", "financial"],
+    "relationships": ["boyfriend", "girlfriend", "breakup", "relationship", "heartbreak"],
+    "motivation": ["procrastination", "motivation", "focus", "concentration", "distracted"],
+}
+
+
+def _themes_for_text(txt):
+    t = (txt or "").lower()
+    hits = []
+    for theme, words in THEME_KEYWORDS.items():
+        if any(w in t for w in words):
+            hits.append(theme)
+    return hits
 
 
 @app.route("/")
@@ -192,15 +391,12 @@ def home():
 @jwt_required(optional=True)
 def chat():
     try:
-        email = get_jwt_identity()  # None if anonymous
+        email = get_jwt_identity()
         data = request.get_json(silent=True) or {}
 
         question = (data.get("message") or "").strip()
-        history = data.get("history", [])
+        history = sanitize_history(data.get("history", []))
         convo_id = data.get("convo_id")
-
-        if not isinstance(history, list):
-            history = []
 
         if not question:
             return jsonify({"reply": "Please enter a message."}), 400
@@ -211,8 +407,11 @@ def chat():
         if is_crisis(question):
             reply = (
                 "I'm really concerned about what you're sharing. Please reach out immediately:\n\n"
-                "🆘 Befrienders Kenya: 0800 723 253 (free, 24/7)\n"
-                "📞 MHFA Kenya: 0800 720 710\n\n"
+                "Befrienders Kenya: +254 793 594 849 / +254 754 580 252\n"
+                "Befrienders Email: info@befrienderskenya.org\n"
+                "MHFA Kenya: +254 114 794 109\n"
+                "MHFA Email: info@mhfakenya.org\n"
+                "Emergency: 999 / 112\n\n"
                 "You don't have to face this alone. Help is available right now."
             )
 
@@ -221,7 +420,16 @@ def chat():
 
             return jsonify({"reply": reply, "stress_level": "crisis", "is_crisis": True})
 
+        if is_short_greeting(question):
+            reply = local_smalltalk_reply(question)
+
+            if email and convo_id is not None:
+                db.save_message(email, str(convo_id), "assistant", reply)
+
+            return jsonify({"reply": reply, "stress_level": "low", "is_crisis": False}), 200
+
         stress_level = assess_stress_level(question)
+
         context = retrieve_context(question)
         answer = ask_llm(question, context, history)
 
@@ -321,9 +529,7 @@ def soft_delete_conversation(convo_id):
     deleted = db.soft_delete_conversation(email, str(convo_id))
     if not deleted:
         return jsonify({"error": "Conversation not found"}), 404
-    # return TTL so frontend can show countdown if it wants
     return jsonify({"deleted": True, "convo_id": str(convo_id), "undo_ttl_seconds": db.UNDO_TTL_SECONDS}), 200
-
 
 @app.route("/conversation/<convo_id>/undo-delete", methods=["POST"])
 @jwt_required()
@@ -333,7 +539,6 @@ def undo_delete_conversation(convo_id):
     if not convo:
         return jsonify({"error": "Undo window expired or conversation not found"}), 404
     return jsonify({"restored": True, "conversation": convo}), 200
-
 
 @app.route("/dashboard/summary", methods=["GET"])
 @jwt_required()
@@ -362,6 +567,131 @@ def dashboard_summary():
         )
 
     return jsonify({"total_conversations": len(convos), "recent_conversations": recent}), 200
+
+@app.route("/dashboard/insights", methods=["GET"])
+@jwt_required()
+def dashboard_insights():
+    email = get_jwt_identity()
+    convos = db.get_conversations(email)
+
+    days = request.args.get("days", "7")
+    try:
+        days_int = max(1, min(60, int(days)))
+    except Exception:
+        days_int = 7
+
+    stress_counts = {"low": 0, "moderate": 0, "severe": 0, "crisis": 0}
+    theme_counts = {k: 0 for k in THEME_KEYWORDS.keys()}
+    crisis_recent = False
+    total_user_msgs = 0
+
+    for convo in convos:
+        for m in convo.get("messages") or []:
+            if (m.get("role") or "") != "user":
+                continue
+            if not _within_days(m.get("timestamp"), days_int):
+                continue
+
+            txt = (m.get("content") or "").strip()
+            if not txt:
+                continue
+
+            total_user_msgs += 1
+
+            if is_crisis(txt):
+                stress_counts["crisis"] += 1
+                crisis_recent = True
+            else:
+                lvl = assess_stress_level(txt)
+                stress_counts[lvl] = stress_counts.get(lvl, 0) + 1
+
+            for th in _themes_for_text(txt):
+                theme_counts[th] += 1
+
+    top_themes = sorted(
+        [{"theme": k, "count": v} for k, v in theme_counts.items() if v > 0],
+        key=lambda x: x["count"],
+        reverse=True,
+    )[:3]
+
+    dominant = "low"
+    if stress_counts["crisis"] > 0:
+        dominant = "crisis"
+    elif stress_counts["severe"] > 0 and stress_counts["severe"] >= stress_counts["moderate"]:
+        dominant = "severe"
+    elif stress_counts["moderate"] > 0:
+        dominant = "moderate"
+
+    moods = db.get_moods(email)
+    today = datetime.now(timezone.utc).date().isoformat()
+    mood_today = next((m for m in moods if str(m.get("date")) == today), None)
+
+    return jsonify(
+        {
+            "window_days": days_int,
+            "total_user_messages": total_user_msgs,
+            "stress_distribution": stress_counts,
+            "dominant_stress_level": dominant,
+            "top_themes": top_themes,
+            "crisis_recent": crisis_recent,
+            "mood_today": mood_today,
+        }
+    ), 200
+
+@app.route("/mood", methods=["GET"])
+@jwt_required()
+def get_mood():
+    email = get_jwt_identity()
+    days = request.args.get("days", "30")
+    try:
+        days_int = max(1, min(365, int(days)))
+    except Exception:
+        days_int = 30
+
+    moods = db.get_moods(email)
+    cutoff = datetime.now(timezone.utc).date().toordinal() - days_int + 1
+
+    filtered = []
+    for m in moods:
+        d = str(m.get("date") or "")
+        try:
+            ord_d = datetime.fromisoformat(d).date().toordinal()
+        except Exception:
+            continue
+        if ord_d >= cutoff:
+            filtered.append(m)
+
+    return jsonify({"moods": filtered}), 200
+
+@app.route("/mood", methods=["POST"])
+@jwt_required()
+def upsert_mood():
+    email = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+
+    mood = (data.get("mood") or "").strip().lower()
+    tags = data.get("tags") or []
+    note = data.get("note") or ""
+    date = (data.get("date") or "").strip()
+
+    allowed = {"great", "okay", "stressed", "low", "overwhelmed"}
+    if mood not in allowed:
+        return jsonify({"error": "Invalid mood"}), 400
+
+    if date:
+        try:
+            datetime.fromisoformat(date).date()
+        except Exception:
+            return jsonify({"error": "Invalid date"}), 400
+    else:
+        date = datetime.now(timezone.utc).date().isoformat()
+
+    if not isinstance(tags, list):
+        tags = []
+    tags = [str(t).strip().lower() for t in tags if str(t).strip()]
+
+    entry = db.upsert_mood(email, date, mood, tags=tags, note=note)
+    return jsonify({"saved": True, "mood": entry}), 201
 
 
 if __name__ == "__main__":
