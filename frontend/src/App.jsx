@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import DashboardPage from './pages/DashboardPage';
 import Navbar from './components/Navbar';
+import ResourcesPage from './pages/ResourcesPage';
 
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/chat" element={<ChatInterface />} />
+          <Route path="/resources" element={<ResourcesPage />} />
           <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </div>
