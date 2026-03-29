@@ -5,3 +5,4 @@ __pycache__/
 users.json
 conversations.json
 chats.json
+moods.json
