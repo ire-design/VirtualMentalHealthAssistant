@@ -14,6 +14,11 @@ migrate = Migrate()
 
 app = Flask(__name__)
 
+@app.before_request
+def _handle_preflight():
+    if request.method == "OPTIONS":
+        return "", 204
+
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db_sql.init_app(app)
@@ -25,7 +30,8 @@ CORS(
         "http://localhost:5173"
     ]}},
     allow_headers=["Content-Type", "Authorization"],
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    max_age=86400
 )
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
