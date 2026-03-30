@@ -33,16 +33,28 @@ function ChatInterface() {
 
   const messagesEndRef = useRef(null);
 
+  // ── Wake up Render on mount so it's ready before the user does anything ──
+  useEffect(() => {
+    fetch('https://virtualmentalhealthassistant.onrender.com/')
+      .catch(() => {}); // silently ping — just to wake the server
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  // ── Safe refresh — never crashes the UI if the server is busy ────────────
   const refreshConversations = async () => {
     if (!token) return [];
-    const data = await getConversations();
-    const list = data.conversations || [];
-    setConversations(list);
-    return list;
+    try {
+      const data = await getConversations();
+      const list = data.conversations || [];
+      setConversations(list);
+      return list;
+    } catch (e) {
+      console.warn('Could not refresh conversations:', e);
+      return [];
+    }
   };
 
   const openConversation = async (convoId) => {
@@ -93,9 +105,7 @@ function ChatInterface() {
     (async () => {
       try {
         if (!token) return;
-
         await refreshConversations();
-
         const fromQuery = getConvoIdFromQuery();
         if (fromQuery) await openConversation(fromQuery);
         else {
@@ -173,7 +183,8 @@ function ChatInterface() {
         const created = await createConversation();
         convoId = created.convo_id;
         setCurrentConvoId(convoId);
-        await refreshConversations();
+        // ── Delay refresh after creating conversation so Render isn't overwhelmed
+        setTimeout(() => refreshConversations(), 1500);
         window.history.replaceState({}, '', `/chat?c=${encodeURIComponent(convoId)}`);
       } catch (e) {
         console.error('Failed to create conversation:', e);
@@ -184,9 +195,6 @@ function ChatInterface() {
 
     const userMessage = { role: 'user', content: trimmedInput };
     const updatedMessages = [...messages, userMessage];
-
-    // IMPORTANT:
-    // Send history WITHOUT the latest user message because the backend receives `message` separately.
     const historyWithoutLatest = messages;
 
     setMessages(updatedMessages);
@@ -210,7 +218,11 @@ function ChatInterface() {
       const aiMessage = { role: 'assistant', content: data.reply };
       setMessages([...updatedMessages, aiMessage]);
 
-      if (token) await refreshConversations();
+      // ── Delay sidebar refresh so Render has time to recover after /chat ──
+      // This prevents the false CORS error caused by hitting /conversations
+      // immediately after /chat on Render's free tier.
+      if (token) setTimeout(() => refreshConversations(), 1500);
+
     } catch (error) {
       console.error('Send error:', error);
       setMessages([
@@ -266,7 +278,7 @@ function ChatInterface() {
 
             {!token && (
               <div className="anon-hint">
-                You’re chatting anonymously. Log in to save and manage conversations.
+                You're chatting anonymously. Log in to save and manage conversations.
               </div>
             )}
 
