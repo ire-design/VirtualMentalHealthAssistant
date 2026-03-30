@@ -14,8 +14,6 @@ migrate = Migrate()
 
 app = Flask(__name__)
 
-
-
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db_sql.init_app(app)
@@ -28,6 +26,7 @@ CORS(
     ]}},
     allow_headers=["Content-Type", "Authorization"],
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    supports_credentials=True,
     max_age=86400
 )
 
@@ -37,40 +36,46 @@ app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)
 jwt = JWTManager(app)
 db.init_db()
 
-# Lazy load heavy dependencies only when needed
-_model = None
+# ── Pinecone lazy loading (no sentence-transformers, no torch) ─────────────────
+_pc = None
 _index = None
 
-def get_embedding_model():
-    """Lazy load the embedding model only when actually used"""
-    global _model
-    if _model is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-            _model = SentenceTransformer("all-MiniLM-L6-v2")
-        except Exception as e:
-            print("Embedding model load error:", e)
-    return _model
-
-def get_pinecone_index():
-    """Lazy load Pinecone only when actually used"""
-    global _index
-    if _index is None:
+def get_pinecone_client():
+    global _pc
+    if _pc is None:
         PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
         if PINECONE_API_KEY:
             try:
                 from pinecone import Pinecone
-                pc = Pinecone(api_key=PINECONE_API_KEY)
+                _pc = Pinecone(api_key=PINECONE_API_KEY)
+            except Exception as e:
+                print("Pinecone client error:", e)
+    return _pc
+
+def get_pinecone_index():
+    global _index
+    if _index is None:
+        pc = get_pinecone_client()
+        if pc:
+            try:
                 _index = pc.Index("mental-health-assistant")
             except Exception as e:
-                print("Pinecone initialization error:", e)
+                print("Pinecone index error:", e)
     return _index
 
+
+# ── Constants ──────────────────────────────────────────────────────────────────
 MIN_QUERY_CHARS_FOR_RETRIEVAL = 12
 PINECONE_SCORE_THRESHOLD = 0.78
 MAX_CONTEXT_MATCHES = 3
-SKIP_RETRIEVAL_EXACT = {"hi", "hey", "hello", "yoh", "niaje", "sasa", "mambo", "lol", "ok", "okay", "no", "noo", "yes", "yeah", "yep", "sure", "thanks", "thank you"}
+SKIP_RETRIEVAL_EXACT = {
+    "hi", "hey", "hello", "yoh", "niaje", "sasa", "mambo", "lol",
+    "ok", "okay", "no", "noo", "yes", "yeah", "yep", "sure",
+    "thanks", "thank you"
+}
 
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 def sanitize_history(history):
     if not isinstance(history, list):
         return []
@@ -111,27 +116,44 @@ def local_smalltalk_reply(message: str) -> str:
     return "I'm here. If you want, tell me what's going on with school or your stress right now."
 
 def retrieve_context(question: str) -> str:
-    """Only load model/index when actually retrieving"""
+    """
+    Embed the user question using Pinecone's hosted multilingual-e5-large model
+    and retrieve relevant mental health context chunks.
+    No local model — embedding runs on Pinecone's servers.
+    """
+    pc = get_pinecone_client()
     index = get_pinecone_index()
-    model = get_embedding_model()
-    
-    if not index or not model:
+
+    if not pc or not index:
         return ""
-    
+
     q = (question or "").strip()
     q_lower = q.lower()
     if len(q) < MIN_QUERY_CHARS_FOR_RETRIEVAL or q_lower in SKIP_RETRIEVAL_EXACT:
         return ""
+
     try:
-        query_vector = model.encode(q).tolist()
-        results = index.query(vector=query_vector, top_k=MAX_CONTEXT_MATCHES, include_metadata=True)
+        # "query" input_type is for user questions (vs "passage" for stored docs)
+        embedding_response = pc.inference.embed(
+            model="multilingual-e5-large",
+            inputs=[q],
+            parameters={"input_type": "query"}
+        )
+        query_vector = embedding_response[0].values
+
+        results = index.query(
+            vector=query_vector,
+            top_k=MAX_CONTEXT_MATCHES,
+            include_metadata=True
+        )
         matches = getattr(results, "matches", None) or []
         if not matches:
             return ""
-        top = matches[0]
-        top_score = getattr(top, "score", None)
+
+        top_score = getattr(matches[0], "score", None)
         if top_score is not None and top_score < PINECONE_SCORE_THRESHOLD:
             return ""
+
         context_chunks = []
         for m in matches:
             md = getattr(m, "metadata", None) or {}
@@ -139,14 +161,18 @@ def retrieve_context(question: str) -> str:
             if txt:
                 context_chunks.append(txt)
         return "\n\n---\n\n".join(context_chunks).strip()
+
     except Exception as e:
-        print("Pinecone Error:", e)
+        print("Pinecone retrieval error:", e)
         return ""
 
 def ask_llm(question: str, context: str, history=None) -> str:
     if not OPENROUTER_API_KEY:
         return "AI service unavailable."
-    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
     system_prompt = """
 You are a warm, emotionally intelligent mental health support assistant
 for Kenyan university students experiencing academic stress.
@@ -177,18 +203,33 @@ CRISIS HANDLING RULES:
 - Respond with empathy, then suggest external help (helplines).
 - Stay calm, human, supportive; do not be repetitive.
 """.strip()
+
     messages = [{"role": "system", "content": system_prompt}]
     if history and isinstance(history, list):
         messages.extend(history)
     if context and isinstance(context, str) and context.strip():
-        messages.append({"role": "system", "content": "Optional background text for the assistant. Use only if clearly relevant to the user's last message. Do not mention or quote it.\n\n" + context.strip()})
+        messages.append({
+            "role": "system",
+            "content": "Optional background text for the assistant. Use only if clearly relevant to the user's last message. Do not mention or quote it.\n\n" + context.strip()
+        })
     messages.append({"role": "user", "content": question})
-    payload = {"model": "openai/gpt-3.5-turbo", "messages": messages, "temperature": 0.4}
+
+    payload = {
+        "model": "openai/gpt-3.5-turbo",
+        "messages": messages,
+        "temperature": 0.4
+    }
+
     try:
         last_err = None
         for attempt in range(3):
             try:
-                response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=30)
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
                 if response.status_code >= 400:
                     print("OpenRouter HTTP", response.status_code, response.text[:500])
                 response.raise_for_status()
@@ -206,15 +247,29 @@ CRISIS HANDLING RULES:
         print("LLM Error:", e)
         return "AI service unavailable."
 
-CRISIS_KEYWORDS = ["suicide", "suicidal", "kill myself", "end my life", "want to die", "self harm", "hurt myself", "can't go on", "dropping out", "quit school", "no way out", "can't continue university", "hopelessness", "giving up on life"]
+
+# ── Crisis & stress detection ──────────────────────────────────────────────────
+CRISIS_KEYWORDS = [
+    "suicide", "suicidal", "kill myself", "end my life", "want to die",
+    "self harm", "hurt myself", "can't go on", "dropping out", "quit school",
+    "no way out", "can't continue university", "hopelessness", "giving up on life"
+]
 
 def is_crisis(message: str) -> bool:
     return any(keyword in (message or "").lower() for keyword in CRISIS_KEYWORDS)
 
 def assess_stress_level(message: str) -> str:
     message_lower = (message or "").lower()
-    severe_keywords = ["can't cope", "overwhelming", "breaking down", "mental breakdown", "can't sleep", "panic attack", "anxiety attack", "severe stress", "extremely stressed", "too much pressure", "can't handle"]
-    moderate_keywords = ["stressed", "anxious", "worried", "nervous", "pressure", "difficult", "struggling", "exhausted", "tired", "overwhelmed", "hectic", "might quit", "want to quit", "quit school", "drop out"]
+    severe_keywords = [
+        "can't cope", "overwhelming", "breaking down", "mental breakdown",
+        "can't sleep", "panic attack", "anxiety attack", "severe stress",
+        "extremely stressed", "too much pressure", "can't handle"
+    ]
+    moderate_keywords = [
+        "stressed", "anxious", "worried", "nervous", "pressure", "difficult",
+        "struggling", "exhausted", "tired", "overwhelmed", "hectic",
+        "might quit", "want to quit", "quit school", "drop out"
+    ]
     if any(k in message_lower for k in severe_keywords):
         return "severe"
     if any(k in message_lower for k in moderate_keywords):
@@ -235,7 +290,13 @@ def _within_days(ts_iso, days):
     return (now - dt).total_seconds() <= days * 24 * 3600
 
 THEME_KEYWORDS = {
-    "academics": ["exam", "exams", "midterm", "finals", "quiz", "cat", "assignment", "deadline", "coursework", "thesis", "dissertation", "submission", "project", "presentation", "grades", "gpa", "fail", "failing", "marks", "study", "studying", "revision", "lecture", "semester", "unit", "units", "syllabus", "timetable"],
+    "academics": [
+        "exam", "exams", "midterm", "finals", "quiz", "cat", "assignment",
+        "deadline", "coursework", "thesis", "dissertation", "submission",
+        "project", "presentation", "grades", "gpa", "fail", "failing",
+        "marks", "study", "studying", "revision", "lecture", "semester",
+        "unit", "units", "syllabus", "timetable"
+    ],
     "sleep": ["sleep", "insomnia", "can't sleep", "tired", "exhausted", "sleep deprived"],
     "money": ["fees", "helb", "bursary", "upkeep", "rent", "money", "financial"],
     "relationships": ["boyfriend", "girlfriend", "breakup", "relationship", "heartbreak"],
@@ -250,6 +311,8 @@ def _themes_for_text(txt):
             hits.append(theme)
     return hits
 
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
 @app.route("/")
 def home():
     return "Virtual Mental Health Assistant Backend is running"
@@ -263,32 +326,42 @@ def chat():
         question = (data.get("message") or "").strip()
         history = sanitize_history(data.get("history", []))
         convo_id = data.get("convo_id")
+
         if not question:
             return jsonify({"reply": "Please enter a message."}), 400
+
         if email and convo_id is not None:
             db.save_message(email, str(convo_id), "user", question)
+
         if is_crisis(question):
-            reply = ("I'm really concerned about what you're sharing. Please reach out immediately:\n\n"
-                     "Befrienders Kenya: +254 793 594 849 / +254 754 580 252\n"
-                     "Befrienders Email: info@befrienderskenya.org\n"
-                     "MHFA Kenya: +254 114 794 109\n"
-                     "MHFA Email: info@mhfakenya.org\n"
-                     "Emergency: 999 / 112\n\n"
-                     "You don't have to face this alone. Help is available right now.")
+            reply = (
+                "I'm really concerned about what you're sharing. Please reach out immediately:\n\n"
+                "Befrienders Kenya: +254 793 594 849 / +254 754 580 252\n"
+                "Befrienders Email: info@befrienderskenya.org\n"
+                "MHFA Kenya: +254 114 794 109\n"
+                "MHFA Email: info@mhfakenya.org\n"
+                "Emergency: 999 / 112\n\n"
+                "You don't have to face this alone. Help is available right now."
+            )
             if email and convo_id is not None:
                 db.save_message(email, str(convo_id), "assistant", reply)
             return jsonify({"reply": reply, "stress_level": "crisis", "is_crisis": True})
+
         if is_short_greeting(question):
             reply = local_smalltalk_reply(question)
             if email and convo_id is not None:
                 db.save_message(email, str(convo_id), "assistant", reply)
             return jsonify({"reply": reply, "stress_level": "low", "is_crisis": False}), 200
+
         stress_level = assess_stress_level(question)
         context = retrieve_context(question)
         answer = ask_llm(question, context, history)
+
         if email and convo_id is not None:
             db.save_message(email, str(convo_id), "assistant", answer)
+
         return jsonify({"reply": answer, "stress_level": stress_level, "is_crisis": False})
+
     except Exception as e:
         print("Chat Endpoint Error:", e)
         return jsonify({"reply": "Server error occurred."}), 500
@@ -336,7 +409,11 @@ def get_user_conversations():
                 txt = (convo["messages"][0].get("content") or "").strip()
             if txt:
                 preview = txt[:60] + ("..." if len(txt) > 60 else "")
-        result.append({"id": convo["id"], "preview": preview, "created_at": convo.get("created_at")})
+        result.append({
+            "id": convo["id"],
+            "preview": preview,
+            "created_at": convo.get("created_at")
+        })
     return jsonify({"conversations": result}), 200
 
 @app.route("/conversation/<convo_id>", methods=["GET"])
@@ -362,7 +439,11 @@ def soft_delete_conversation(convo_id):
     deleted = db.soft_delete_conversation(email, str(convo_id))
     if not deleted:
         return jsonify({"error": "Conversation not found"}), 404
-    return jsonify({"deleted": True, "convo_id": str(convo_id), "undo_ttl_seconds": db.UNDO_TTL_SECONDS}), 200
+    return jsonify({
+        "deleted": True,
+        "convo_id": str(convo_id),
+        "undo_ttl_seconds": db.UNDO_TTL_SECONDS
+    }), 200
 
 @app.route("/conversation/<convo_id>/undo-delete", methods=["POST"])
 @jwt_required()
@@ -387,8 +468,16 @@ def dashboard_summary():
             txt = (last.get("content") or "").strip()
             if txt:
                 preview = txt[:80] + ("..." if len(txt) > 80 else "")
-        recent.append({"id": c.get("id"), "created_at": c.get("created_at"), "preview": preview, "message_count": len(c.get("messages") or [])})
-    return jsonify({"total_conversations": len(convos), "recent_conversations": recent}), 200
+        recent.append({
+            "id": c.get("id"),
+            "created_at": c.get("created_at"),
+            "preview": preview,
+            "message_count": len(c.get("messages") or [])
+        })
+    return jsonify({
+        "total_conversations": len(convos),
+        "recent_conversations": recent
+    }), 200
 
 @app.route("/dashboard/insights", methods=["GET"])
 @jwt_required()
@@ -400,10 +489,12 @@ def dashboard_insights():
         days_int = max(1, min(60, int(days)))
     except Exception:
         days_int = 7
+
     stress_counts = {"low": 0, "moderate": 0, "severe": 0, "crisis": 0}
     theme_counts = {k: 0 for k in THEME_KEYWORDS.keys()}
     crisis_recent = False
     total_user_msgs = 0
+
     for convo in convos:
         for m in convo.get("messages") or []:
             if (m.get("role") or "") != "user":
@@ -422,7 +513,13 @@ def dashboard_insights():
                 stress_counts[lvl] = stress_counts.get(lvl, 0) + 1
             for th in _themes_for_text(txt):
                 theme_counts[th] += 1
-    top_themes = sorted([{"theme": k, "count": v} for k, v in theme_counts.items() if v > 0], key=lambda x: x["count"], reverse=True)[:3]
+
+    top_themes = sorted(
+        [{"theme": k, "count": v} for k, v in theme_counts.items() if v > 0],
+        key=lambda x: x["count"],
+        reverse=True
+    )[:3]
+
     dominant = "low"
     if stress_counts["crisis"] > 0:
         dominant = "crisis"
@@ -430,10 +527,20 @@ def dashboard_insights():
         dominant = "severe"
     elif stress_counts["moderate"] > 0:
         dominant = "moderate"
+
     moods = db.get_moods(email)
     today = datetime.now(timezone.utc).date().isoformat()
     mood_today = next((m for m in moods if str(m.get("date")) == today), None)
-    return jsonify({"window_days": days_int, "total_user_messages": total_user_msgs, "stress_distribution": stress_counts, "dominant_stress_level": dominant, "top_themes": top_themes, "crisis_recent": crisis_recent, "mood_today": mood_today}), 200
+
+    return jsonify({
+        "window_days": days_int,
+        "total_user_messages": total_user_msgs,
+        "stress_distribution": stress_counts,
+        "dominant_stress_level": dominant,
+        "top_themes": top_themes,
+        "crisis_recent": crisis_recent,
+        "mood_today": mood_today
+    }), 200
 
 @app.route("/mood", methods=["GET"])
 @jwt_required()
@@ -444,6 +551,7 @@ def get_mood():
         days_int = max(1, min(365, int(days)))
     except Exception:
         days_int = 30
+
     moods = db.get_moods(email)
     cutoff = datetime.now(timezone.utc).date().toordinal() - days_int + 1
     filtered = []
@@ -466,9 +574,11 @@ def upsert_mood():
     tags = data.get("tags") or []
     note = data.get("note") or ""
     date = (data.get("date") or "").strip()
+
     allowed = {"great", "okay", "stressed", "low", "overwhelmed"}
     if mood not in allowed:
         return jsonify({"error": "Invalid mood"}), 400
+
     if date:
         try:
             datetime.fromisoformat(date).date()
@@ -476,11 +586,14 @@ def upsert_mood():
             return jsonify({"error": "Invalid date"}), 400
     else:
         date = datetime.now(timezone.utc).date().isoformat()
+
     if not isinstance(tags, list):
         tags = []
     tags = [str(t).strip().lower() for t in tags if str(t).strip()]
+
     entry = db.upsert_mood(email, date, mood, tags=tags, note=note)
     return jsonify({"saved": True, "mood": entry}), 201
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
