@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faExclamationTriangle, faTrash } from '@fortawesome/free-solid-svg-icons';
 import {
@@ -14,6 +15,15 @@ import '../styles/chatInterface.css';
 
 function ChatInterface() {
   const token = localStorage.getItem('token');
+  const navigate = useNavigate();
+
+  const handleBackNavigation = () => {
+    if (token) {
+      navigate('/dashboard');
+      return;
+    }
+    navigate('/');
+  };
 
   const [conversations, setConversations] = useState([]);
   const [currentConvoId, setCurrentConvoId] = useState(null);
@@ -33,17 +43,17 @@ function ChatInterface() {
 
   const messagesEndRef = useRef(null);
 
-  // ── Wake up Render on mount so it's ready before the user does anything ──
+
   useEffect(() => {
     fetch('https://virtualmentalhealthassistant.onrender.com/')
-      .catch(() => {}); // silently ping — just to wake the server
+      .catch(() => {}); 
   }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // ── Safe refresh — never crashes the UI if the server is busy ────────────
+  // Safe refresh,never crashes the UI if the server is busy 
   const refreshConversations = async () => {
     if (!token) return [];
     try {
@@ -218,8 +228,8 @@ function ChatInterface() {
       const aiMessage = { role: 'assistant', content: data.reply };
       setMessages([...updatedMessages, aiMessage]);
 
-      // ── Delay sidebar refresh so Render has time to recover after /chat ──
-      // This prevents the false CORS error caused by hitting /conversations
+      //Delay sidebar refresh so Render has time to recover after /chat 
+      // prevents the false CORS error caused by hitting /conversations
       // immediately after /chat on Render's free tier.
       if (token) setTimeout(() => refreshConversations(), 1500);
 
@@ -253,6 +263,8 @@ function ChatInterface() {
             <div className="t1">Virtual Mental Health Assistant</div>
             <div className="t2">Academic Stress Support</div>
           </div>
+          <button className="back-btn" onClick={handleBackNavigation} aria-label="Go back">← Dashboard
+          </button>
 
           {stressLevel && (
             <div className="stress-summary">

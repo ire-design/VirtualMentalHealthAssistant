@@ -49,6 +49,9 @@ function DashboardPage() {
   const dominantStress = insights?.dominant_stress_level || null;
   const dominantLabel = dominantStress ? String(dominantStress).toLowerCase() : null;
   const topTheme = (insights?.top_themes || [])[0]?.theme || null;
+  const currentMood = insights?.mood_today?.mood
+    ? `${String(insights.mood_today.mood).charAt(0).toUpperCase()}${String(insights.mood_today.mood).slice(1)}`
+    : 'Mood';
 
   const stressLabelText = () => {
     if (!insights) return 'Stress Insights (next)';
@@ -59,9 +62,7 @@ function DashboardPage() {
   };
 
   const moodTileLabel = () => {
-    const m = insights?.mood_today?.mood;
-    if (!m) return 'Mood Tracking (tap to check-in)';
-    return `Today: ${String(m).charAt(0).toUpperCase()}${String(m).slice(1)}`;
+    return 'Mood Tracking (tap to check-in)';
   };
 
   const saveMoodNow = async () => {
@@ -114,7 +115,7 @@ function DashboardPage() {
             </div>
 
             <div className="stat-card moderate clickable" onClick={() => setMoodOpen(true)} title="Mood check-in">
-              <div className="stat-number">{moodSaved ? '✓' : '—'}</div>
+              <div className="stat-number">{currentMood}</div>
               <div className="stat-label">{moodTileLabel()}</div>
             </div>
 

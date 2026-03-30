@@ -28,7 +28,7 @@
   background: radial-gradient(800px 240px at 25% 10%, rgba(255,243,232,0.18), transparent 55%);
 }
 
-.back-btn{
+.resources-header .back-btn{
   position:absolute;
   left: 16px;
   top: 16px;
@@ -167,6 +167,6 @@
 
 @media (max-width: 768px){
   .resources-header h1{ font-size: 28px; }
-  .back-btn{ position: static; margin-bottom: 12px; display: inline-block; }
+  .resources-header .back-btn{ position: static; margin-bottom: 12px; display: inline-block; }
   .cards{ grid-template-columns: 1fr; }
 }
