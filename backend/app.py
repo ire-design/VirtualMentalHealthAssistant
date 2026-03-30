@@ -36,7 +36,7 @@ app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)
 jwt = JWTManager(app)
 db.init_db()
 
-# ── Pinecone lazy loading (no sentence-transformers, no torch) ─────────────────
+#  Pinecone lazy loading (no sentence-transformers, no torch) 
 _pc = None
 _index = None
 
@@ -63,8 +63,7 @@ def get_pinecone_index():
                 print("Pinecone index error:", e)
     return _index
 
-
-# ── Constants ──────────────────────────────────────────────────────────────────
+# Constants 
 MIN_QUERY_CHARS_FOR_RETRIEVAL = 12
 PINECONE_SCORE_THRESHOLD = 0.78
 MAX_CONTEXT_MATCHES = 3
@@ -74,8 +73,7 @@ SKIP_RETRIEVAL_EXACT = {
     "thanks", "thank you"
 }
 
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
+#  Helpers 
 def sanitize_history(history):
     if not isinstance(history, list):
         return []
@@ -248,7 +246,7 @@ CRISIS HANDLING RULES:
         return "AI service unavailable."
 
 
-# ── Crisis & stress detection ──────────────────────────────────────────────────
+#  Crisis & stress detection 
 CRISIS_KEYWORDS = [
     "suicide", "suicidal", "kill myself", "end my life", "want to die",
     "self harm", "hurt myself", "can't go on", "dropping out", "quit school",
@@ -312,7 +310,7 @@ def _themes_for_text(txt):
     return hits
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+#── Routes ───
 @app.route("/")
 def home():
     return "Virtual Mental Health Assistant Backend is running"
