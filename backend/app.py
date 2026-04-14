@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from datetime import timedelta, datetime, timezone
 from flask_migrate import Migrate
-from models import db_sql
+from models import db_sql, Resource
 import db
 
 load_dotenv()
@@ -248,7 +248,7 @@ CRISIS HANDLING RULES:
 
 #  Crisis & stress detection 
 CRISIS_KEYWORDS = [
-    "suicide", "suicidal", "kill myself", "end my life", "want to die",
+    "suicide", "suicidal", "kill myself","kill my self","overdose", "over dose" "end my life", "want to die",
     "self harm", "hurt myself", "can't go on", "dropping out", "quit school",
     "no way out", "can't continue university", "hopelessness", "giving up on life"
 ]
@@ -284,6 +284,8 @@ def _within_days(ts_iso, days):
     dt = _parse_iso(ts_iso)
     if not dt:
         return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
     return (now - dt).total_seconds() <= days * 24 * 3600
 
@@ -529,15 +531,34 @@ def dashboard_insights():
     moods = db.get_moods(email)
     today = datetime.now(timezone.utc).date().isoformat()
     mood_today = next((m for m in moods if str(m.get("date")) == today), None)
+    # Mood average score
+    MOOD_SCORES = {"great": 5, "okay": 4, "stressed": 3, "low": 2, "overwhelmed": 1}
+    recent_moods = [
+        m for m in db.get_moods(email)
+        if _within_days(str(m.get("date")), days_int)
+    ]
+    mood_scores = [MOOD_SCORES.get(str(m.get("mood", "")).lower(), 0) for m in recent_moods if m.get("mood")]
+    mood_average = round(sum(mood_scores) / len(mood_scores), 1) if mood_scores else None
+
+    # Stress percentages
+    stress_pct = {}
+    if total_user_msgs > 0:
+        for k, v in stress_counts.items():
+            stress_pct[k] = round((v / total_user_msgs) * 100, 1)
+    else:
+        stress_pct = {k: 0 for k in stress_counts}
 
     return jsonify({
         "window_days": days_int,
         "total_user_messages": total_user_msgs,
         "stress_distribution": stress_counts,
+        "stress_percentages": stress_pct,
         "dominant_stress_level": dominant,
         "top_themes": top_themes,
         "crisis_recent": crisis_recent,
-        "mood_today": mood_today
+        "mood_today": mood_today,
+        "mood_average": mood_average,
+        "mood_entries_count": len(mood_scores)
     }), 200
 
 @app.route("/mood", methods=["GET"])
@@ -592,6 +613,185 @@ def upsert_mood():
     entry = db.upsert_mood(email, date, mood, tags=tags, note=note)
     return jsonify({"saved": True, "mood": entry}), 201
 
+@app.route("/resources", methods=["GET"])
+def get_resources():
+    category = request.args.get("category", "").strip().lower()
+    query = Resource.query
+    if category:
+        query = query.filter(Resource.category.ilike(f"%{category}%"))
+    resources = query.order_by(Resource.category, Resource.title).all()
+    return jsonify({"resources": [
+        {"id": r.id, "title": r.title, "category": r.category,
+         "description": r.description, "link": r.link}
+        for r in resources
+    ]}), 200
+
+@app.route("/resources", methods=["POST"])
+@jwt_required()
+def add_resource():
+    data = request.get_json(silent=True) or {}
+    title    = (data.get("title") or "").strip()
+    category = (data.get("category") or "").strip()
+    if not title or not category:
+        return jsonify({"error": "Title and category are required"}), 400
+    r = Resource(
+        title=title,
+        category=category,
+        description=(data.get("description") or "").strip(),
+        link=(data.get("link") or "").strip()
+    )
+    db_sql.session.add(r)
+    db_sql.session.commit()
+    return jsonify({"created": True, "id": r.id}), 201
+
+@app.route("/resources/<int:resource_id>", methods=["DELETE"])
+@jwt_required()
+def delete_resource(resource_id):
+    r = Resource.query.get(resource_id)
+    if not r:
+        return jsonify({"error": "Not found"}), 404
+    db_sql.session.delete(r)
+    db_sql.session.commit()
+    return jsonify({"deleted": True}), 200
+
+@app.route("/resources/seed", methods=["POST"])
+def seed_resources():
+    if Resource.query.count() > 0:
+        return jsonify({"message": "Already seeded"}), 200
+    seeds = [
+        {"title": "Exam Anxiety Grounding Techniques", "category": "video",
+         "description": "Short grounding and calming tips for exam anxiety", "link": "https://www.youtube.com/results?search_query=exam+anxiety+grounding+techniques"},
+        {"title": "Box Breathing (4-4-4-4) Explained", "category": "video",
+         "description": "Visual guide to box breathing for stress relief", "link": "https://www.youtube.com/results?search_query=box+breathing+4-4-4-4"},
+        {"title": "Pomodoro Technique", "category": "article",
+         "description": "Study focus technique using timed intervals", "link": "https://en.wikipedia.org/wiki/Pomodoro_Technique"},
+        {"title": "Spaced Repetition", "category": "article",
+         "description": "Study smarter using spaced repetition memory technique", "link": "https://en.wikipedia.org/wiki/Spaced_repetition"},
+        {"title": "Befrienders Kenya", "category": "emergency",
+         "description": "Suicide prevention and emotional crisis support. Call: +254 793 594 849", "link": "mailto:info@befrienderskenya.org"},
+        {"title": "MHFA Kenya", "category": "emergency",
+         "description": "Mental health first aid support and referrals. Call: +254 114 794 109", "link": "mailto:info@mhfakenya.org"},
+        {"title": "Progressive Muscle Relaxation", "category": "technique",
+         "description": "Tense and relax each muscle group to reduce physical stress", "link": ""},
+        {"title": "5-4-3-2-1 Grounding", "category": "technique",
+         "description": "Name 5 things you see, 4 hear, 3 touch, 2 smell, 1 taste", "link": ""},
+        {"title": "MUT Counselling Office", "category": "campus",
+         "description": "Murang'a University Student Guidance and Counselling Office", "link": ""},
+    ]
+    for s in seeds:
+        db_sql.session.add(Resource(**s))
+    db_sql.session.commit()
+    return jsonify({"seeded": len(seeds)}), 201
+
+@app.route("/reports", methods=["GET", "OPTIONS"])
+@jwt_required()
+def get_reports():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    email = get_jwt_identity()
+    if not email:
+        return jsonify({"error": "Authentication required"}), 401
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
+
+    if not start_date or not end_date:
+        return jsonify({"error": "start_date and end_date are required"}), 400
+
+    try:
+        start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+    except Exception:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    convos = db.get_conversations(email)
+
+    stress_counts = {"low": 0, "moderate": 0, "severe": 0, "crisis": 0}
+    theme_counts = {k: 0 for k in THEME_KEYWORDS.keys()}
+    total_user_msgs = 0
+    total_ai_msgs = 0
+    crisis_count = 0
+
+    for convo in convos:
+        for m in convo.get("messages") or []:
+            ts = _parse_iso(m.get("timestamp"))
+            if not ts:
+                continue
+            if not (start_dt <= ts <= end_dt):
+                continue
+            role = (m.get("role") or "")
+            if role == "assistant":
+                total_ai_msgs += 1
+                continue
+            if role != "user":
+                continue
+            txt = (m.get("content") or "").strip()
+            if not txt:
+                continue
+            total_user_msgs += 1
+            if is_crisis(txt):
+                stress_counts["crisis"] += 1
+                crisis_count += 1
+            else:
+                lvl = assess_stress_level(txt)
+                stress_counts[lvl] += 1
+            for th in _themes_for_text(txt):
+                theme_counts[th] += 1
+
+    total_msgs = total_user_msgs + total_ai_msgs
+
+    stress_pct = {}
+    for k, v in stress_counts.items():
+        stress_pct[k] = round((v / total_user_msgs) * 100, 1) if total_user_msgs > 0 else 0
+
+    top_themes = sorted(
+        [{"theme": k, "count": v} for k, v in theme_counts.items() if v > 0],
+        key=lambda x: x["count"], reverse=True
+    )
+
+    # Mood data in range
+    MOOD_SCORES = {"great": 5, "okay": 4, "stressed": 3, "low": 2, "overwhelmed": 1}
+    moods = db.get_moods(email)
+    mood_in_range = []
+    mood_breakdown = {"great": 0, "okay": 0, "stressed": 0, "low": 0, "overwhelmed": 0}
+
+    for m in moods:
+        try:
+            d = datetime.fromisoformat(str(m.get("date"))).replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        if start_dt <= d <= end_dt:
+            mood_in_range.append(m)
+            key = str(m.get("mood", "")).lower()
+            if key in mood_breakdown:
+                mood_breakdown[key] += 1
+
+    mood_scores = [MOOD_SCORES.get(str(m.get("mood", "")).lower(), 0) for m in mood_in_range]
+    mood_average = round(sum(mood_scores) / len(mood_scores), 1) if mood_scores else None
+
+    dominant = "low"
+    if stress_counts["crisis"] > 0:
+        dominant = "crisis"
+    elif stress_counts["severe"] >= stress_counts["moderate"] and stress_counts["severe"] > 0:
+        dominant = "severe"
+    elif stress_counts["moderate"] > 0:
+        dominant = "moderate"
+
+    return jsonify({
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_conversations": len(convos),
+        "total_messages": total_msgs,
+        "total_user_messages": total_user_msgs,
+        "total_ai_messages": total_ai_msgs,
+        "stress_distribution": stress_counts,
+        "stress_percentages": stress_pct,
+        "dominant_stress_level": dominant,
+        "crisis_count": crisis_count,
+        "top_themes": top_themes,
+        "mood_average": mood_average,
+        "mood_breakdown": mood_breakdown,
+        "mood_entries_count": len(mood_in_range)
+    }), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

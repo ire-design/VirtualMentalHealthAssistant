@@ -47,3 +47,13 @@ class Mood(db_sql.Model):
     note = db_sql.Column(db_sql.Text, nullable=False, default="")
     created_at = db_sql.Column(db_sql.DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at = db_sql.Column(db_sql.DateTime(timezone=True), default=utcnow, nullable=False)
+
+class Resource(db_sql.Model):
+    __tablename__ = "resources"
+
+    id          = db_sql.Column(db_sql.Integer, primary_key=True)
+    title       = db_sql.Column(db_sql.String(255), nullable=False)
+    category    = db_sql.Column(db_sql.String(80), nullable=False)
+    description = db_sql.Column(db_sql.Text, nullable=True)
+    link        = db_sql.Column(db_sql.String(500), nullable=True)
+    created_at  = db_sql.Column(db_sql.DateTime(timezone=True), default=utcnow, nullable=False)
