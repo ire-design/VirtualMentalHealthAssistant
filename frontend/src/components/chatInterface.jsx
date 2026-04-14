@@ -41,6 +41,8 @@ function ChatInterface() {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const [searchQuery, setSearchQuery] = useState('');
+
   const messagesEndRef = useRef(null);
 
 
@@ -296,24 +298,36 @@ function ChatInterface() {
 
             {token && (
               <div className="conversation-list">
-                {conversations.map((convo) => (
-                  <div
-                    key={convo.id}
-                    className={`convo-item ${String(currentConvoId) === String(convo.id) ? 'active' : ''}`}
-                    onClick={() => openConversation(convo.id)}
-                    title={convo.preview}
-                  >
-                    <span className="convo-title">{convo.preview}</span>
-                    <button
-                      className="convo-delete-btn"
-                      onClick={(e) => handleDeleteConvo(e, convo.id)}
-                      title="Delete conversation"
-                      aria-label="Delete conversation"
+                <input
+                  type="text"
+                  className="convo-search"
+                  placeholder="Search conversations..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {conversations
+                  .filter((convo) =>
+                    searchQuery.trim() === '' ||
+                    (convo.preview || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
+                  )
+                  .map((convo) => (
+                    <div
+                      key={convo.id}
+                      className={`convo-item ${String(currentConvoId) === String(convo.id) ? 'active' : ''}`}
+                      onClick={() => openConversation(convo.id)}
+                      title={convo.preview}
                     >
-                      <FontAwesomeIcon icon={faTrash} />
-                    </button>
-                  </div>
-                ))}
+                      <span className="convo-title">{convo.preview}</span>
+                      <button
+                        className="convo-delete-btn"
+                        onClick={(e) => handleDeleteConvo(e, convo.id)}
+                        title="Delete conversation"
+                        aria-label="Delete conversation"
+                      >
+                        <FontAwesomeIcon icon={faTrash} />
+                      </button>
+                    </div>
+                  ))}
               </div>
             )}
           </aside>
