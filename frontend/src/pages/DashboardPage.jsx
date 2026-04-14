@@ -49,6 +49,9 @@ function DashboardPage() {
   const dominantStress = insights?.dominant_stress_level || null;
   const dominantLabel = dominantStress ? String(dominantStress).toLowerCase() : null;
   const topTheme = (insights?.top_themes || [])[0]?.theme || null;
+  const moodAverage = insights?.mood_average ?? null;
+  const stressPct = insights?.stress_percentages || {};
+  const totalMsgs = insights?.total_user_messages ?? 0;
   const currentMood = insights?.mood_today?.mood
     ? `${String(insights.mood_today.mood).charAt(0).toUpperCase()}${String(insights.mood_today.mood).slice(1)}`
     : 'Mood';
@@ -94,6 +97,9 @@ function DashboardPage() {
               <button className="btn-resources" onClick={() => navigate('/resources')}>
                 Resources
               </button>
+              <button className="btn-resources" onClick={() => navigate('/reports')}>
+                Reports
+              </button>
             </div>
           </div>
 
@@ -105,13 +111,13 @@ function DashboardPage() {
               <div className="stat-label">Total Conversations</div>
             </div>
 
-            <div
-              className={`stat-card low ${insights ? 'clickable' : ''}`}
-              onClick={() => navigate('/resources')}
-              title="View tools and support"
-            >
-              <div className="stat-number">{insights ? (topTheme ? topTheme : 'Insights') : '—'}</div>
-              <div className="stat-label">{stressLabelText()}</div>
+            <div className="stat-card low clickable" onClick={() => navigate('/resources')} title="View tools and support">
+              <div className="stat-number">
+                {moodAverage !== null ? `${moodAverage}/5` : '—'}
+              </div>
+              <div className="stat-label">
+                Avg Mood Score (7 days){insights?.mood_entries_count ? ` • ${insights.mood_entries_count} entries` : ''}
+              </div>
             </div>
 
             <div className="stat-card moderate clickable" onClick={() => setMoodOpen(true)} title="Mood check-in">
@@ -119,15 +125,39 @@ function DashboardPage() {
               <div className="stat-label">{moodTileLabel()}</div>
             </div>
 
-            <div
-              className="stat-card severe clickable"
-              onClick={() => navigate('/resources')}
-              title="Open Wellness Tools resources"
-            >
-              <div className="stat-number">Resources</div>
-              <div className="stat-label">Wellness Tools</div>
+            <div className="stat-card severe clickable" onClick={() => navigate('/resources')} title="Open Wellness Tools">
+              <div className="stat-number">
+                {totalMsgs > 0 ? `${stressPct['moderate'] ?? 0}%` : '—'}
+              </div>
+              <div className="stat-label">Stress Rate (7 days) • {totalMsgs} messages</div>
             </div>
           </div>
+
+          {/* Stress breakdown bar */}
+          {totalMsgs > 0 && (
+            <div className="stress-breakdown">
+              <h3>Stress Breakdown (last 7 days)</h3>
+              <div className="stress-bars">
+                {[
+                  { key: 'low', label: 'Low', color: '#2e7d32' },
+                  { key: 'moderate', label: 'Moderate', color: '#b26a00' },
+                  { key: 'severe', label: 'High', color: '#c62828' },
+                  { key: 'crisis', label: 'Crisis', color: '#7b1fa2' }
+                ].map(({ key, label, color }) => (
+                  <div key={key} className="stress-bar-row">
+                    <span className="stress-bar-label">{label}</span>
+                    <div className="stress-bar-track">
+                      <div
+                        className="stress-bar-fill"
+                        style={{ width: `${stressPct[key] ?? 0}%`, background: color }}
+                      />
+                    </div>
+                    <span className="stress-bar-pct">{stressPct[key] ?? 0}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="recent-section">
             <h2>Recent Conversations</h2>
