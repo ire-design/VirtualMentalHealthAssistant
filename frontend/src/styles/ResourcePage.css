@@ -165,6 +165,46 @@
   padding: 10px 0 0;
 }
 
+.resource-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.resource-search {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(43,22,15,0.18);
+  background: rgba(255,255,255,0.9);
+  font-size: 14px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cat-tab {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(43,22,15,0.18);
+  background: rgba(255,255,255,0.7);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.cat-tab.active {
+  background: linear-gradient(135deg, #5a2a12, #9a5420);
+  color: #fff;
+  border-color: transparent;
+}
 @media (max-width: 768px){
   .resources-header h1{ font-size: 28px; }
   .resources-header .back-btn{ position: static; margin-bottom: 12px; display: inline-block; }
