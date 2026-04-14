@@ -102,3 +102,35 @@ export const saveMood = async ({ mood, tags = [], note = '', date = '' }) => {
   );
   return response.data;
 };
+
+export const getResources = async (category = '') => {
+  const url = category
+    ? `${API_BASE_URL}/resources?category=${encodeURIComponent(category)}`
+    : `${API_BASE_URL}/resources`;
+  const response = await axios.get(url);
+  return response.data;
+};
+
+export const addResource = async ({ title, category, description, link }) => {
+  const response = await axios.post(
+    `${API_BASE_URL}/resources`,
+    { title, category, description, link },
+    { headers: authHeaders() }
+  );
+  return response.data;
+};
+
+export const deleteResource = async (id) => {
+  const response = await axios.delete(`${API_BASE_URL}/resources/${id}`, {
+    headers: authHeaders()
+  });
+  return response.data;
+};
+
+export const getReports = async (startDate, endDate) => {
+  const response = await axios.get(
+    `${API_BASE_URL}/reports?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`,
+    { headers: authHeaders() }
+  );
+  return response.data;
+};

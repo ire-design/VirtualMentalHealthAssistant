@@ -6,6 +6,7 @@ import SignupPage from './pages/SignupPage';
 import DashboardPage from './pages/DashboardPage';
 import Navbar from './components/Navbar';
 import ResourcesPage from './pages/ResourcesPage';
+import ReportsPage from './pages/ReportsPage';
 
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/chat" element={<ChatInterface />} />
           <Route path="/resources" element={<ResourcesPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </div>
